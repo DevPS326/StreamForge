@@ -54,11 +54,11 @@ export function DemoGate({ children }: { children: ReactNode }) {
       ? 0
       : Math.max(0, Math.ceil((new Date(turn.expiresAt).getTime() - now) / 1000));
 
-  if (turn?.state === "active" && seconds > 0) {
+  if (turn?.state === "active" && (!turn.expiresAt || seconds > 0)) {
     return (
       <>
         <div className="border-b border-line bg-accent/10 px-4 py-2 text-center text-xs font-semibold text-ink">
-          Free demo slot: {seconds}s remaining · 20 MiB/video · 200 MiB global reserved · 1 active user
+          {turn.expiresAt ? `Free demo slot: ${seconds}s remaining · 20 MiB/video · 200 MiB global reserved · 1 active user` : "StreamForge development mode"}
         </div>
         {children}
       </>
