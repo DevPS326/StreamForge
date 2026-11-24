@@ -8,6 +8,7 @@ import { JobRepository } from "./jobs.js";
 import { errorText, log } from "./log.js";
 import { runProcess } from "./process.js";
 import { ProcessingWorker } from "./runner.js";
+import { PostgresJobQueue } from "./pg-queue.js";
 import { MediaStorage, removeAbandonedScratch } from "./storage.js";
 
 async function main() {
@@ -46,10 +47,9 @@ async function main() {
     requestChecksumCalculation: "WHEN_REQUIRED",
     responseChecksumValidation: "WHEN_REQUIRED",
   });
-  const queue = new SQSClient({
-    region: settings.region,
-    endpoint: settings.sqsEndpoint,
-  });
+  const queue: SQSClient = process.env.DEMO_FREE_MODE === "1"
+    ? (new PostgresJobQueue(prisma, stop.signal) as unknown as SQSClient)
+    : new SQSClient({ region: settings.region, endpoint: settings.sqsEndpoint });
   const jobs = new JobRepository(
     prisma,
     settings.leaseSeconds,
