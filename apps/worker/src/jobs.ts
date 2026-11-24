@@ -11,6 +11,7 @@ export type ClaimedJob = QueueJob & {
   attempts: number;
   originalKey: string;
   sizeBytes: bigint;
+  demoExpiresAt?: Date;
 };
 
 export type QueueAction =
@@ -74,7 +75,14 @@ export class JobRepository {
     const found = await this.db.processingJob.findUnique({
       where: { id: message.jobId },
       include: {
-        video: { select: { status: true, originalKey: true, sizeBytes: true } },
+        video: {
+          select: {
+            status: true,
+            originalKey: true,
+            sizeBytes: true,
+            demoExpiresAt: true,
+          },
+        },
       },
     });
     if (!found || found.videoId !== message.videoId) return { kind: "ack" };
@@ -85,6 +93,11 @@ export class JobRepository {
     ) {
       return { kind: "ack" };
     }
+    if (
+      process.env.DEMO_FREE_MODE === "1" &&
+      (!found.video.demoExpiresAt || found.video.demoExpiresAt <= now)
+    )
+      return { kind: "ack" };
     const eligibleAt =
       found.status === "PENDING" ? found.nextAttemptAt : found.leaseExpiresAt;
     if (eligibleAt && eligibleAt > now) {
@@ -144,6 +157,7 @@ export class JobRepository {
         attempts: found.attempts + 1,
         originalKey: found.video.originalKey,
         sizeBytes: found.video.sizeBytes,
+        demoExpiresAt: found.video.demoExpiresAt ?? undefined,
       },
     };
   }
@@ -187,10 +201,25 @@ export class JobRepository {
       });
       if (!processing.count) return false;
 
+      let demoExpiresAt: Date | undefined;
+      if (process.env.DEMO_FREE_MODE === "1") {
+        const readyAt = new Date();
+        demoExpiresAt = new Date(+readyAt + 120_000);
+        const turn = await tx.demoTurn.updateMany({
+          where: {
+            videoId: job.videoId,
+            readyAt: null,
+            expiresAt: { gt: readyAt },
+          },
+          data: { readyAt, expiresAt: demoExpiresAt },
+        });
+        if (!turn.count) throw new Error("Demo work window expired");
+      }
       const video = await tx.video.updateMany({
         where: { id: job.videoId, status: "PROCESSING" },
         data: {
           status: "READY",
+          demoExpiresAt,
           mediaPrefix: prefix.slice(0, -1),
           width: media.source.width,
           height: media.source.height,

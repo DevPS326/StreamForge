@@ -72,3 +72,9 @@ Production artifacts deploy the web app to Vercel and run the API and worker on 
 - [Security and privacy](docs/SECURITY.md)
 - [Release verification and measurements](docs/RELEASE_CHECKLIST.md)
 - [Monthly AWS cost model](docs/COST.md)
+
+## Free public demo
+
+Sign in, choose **Join demo queue**, and use a clip up to 20 MiB, 45 seconds, and 720p. The demo encodes one output up to 480p. The two-minute window begins after the output and its HLS artifacts are verified. Preview the stream and use the one-use private download to retrieve the original. [Code](https://github.com/DevPS326/StreamForge) ? [Live demo](https://stream-forge-flame.vercel.app/demo)
+
+[Free-demo lifecycle, testing, and billing limits](docs/FREE_DEMO.md)

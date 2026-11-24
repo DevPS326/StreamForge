@@ -224,7 +224,7 @@ export class VideoController {
       select: { id: true },
     });
     if (!video) throw new NotFoundException("Processed video is not ready");
-    const ends = await this.gate.assertActive(request.auth.user.id);
+    const ends = await this.gate.assertActive(request.auth.user.id, id, true);
     const seconds = ends ? Math.floor((+ends - Date.now()) / 1000) : 120;
     if (seconds < 1) throw new ConflictException("Your download slot expired");
     return {
@@ -254,9 +254,21 @@ export class VideoController {
       },
     });
     if (!video) throw new NotFoundException("Processed video is not ready");
-    await this.gate.assertActive(request.auth.user.id);
-    await this.gate.reserveDownload(request.auth.user.id);
-    const object = await this.storage.get(video.originalKey);
+    const expiresAt = await this.gate.assertActive(
+      request.auth.user.id,
+      id,
+      true,
+    );
+    await this.gate.reserveDownload(request.auth.user.id, id);
+    await this.gate.reserveEgress(
+      request.auth.user.id,
+      id,
+      Number(video.sizeBytes),
+    );
+    const signal = expiresAt
+      ? AbortSignal.timeout(Math.max(1, +expiresAt - Date.now()))
+      : undefined;
+    const object = await this.storage.get(video.originalKey, undefined, signal);
     if (!(object.Body instanceof Readable))
       throw new ConflictException("Video download is not available");
     const filename =
@@ -269,7 +281,15 @@ export class VideoController {
     response.setHeader("Cache-Control", "private, no-store");
     response.setHeader("Content-Length", video.sizeBytes.toString());
     try {
-      await pipeline(object.Body, response);
+      await pipeline(
+        object.Body,
+        response,
+        expiresAt
+          ? {
+              signal: AbortSignal.timeout(Math.max(1, +expiresAt - Date.now())),
+            }
+          : {},
+      );
     } finally {
       object.Body.destroy();
     }
@@ -324,38 +344,7 @@ export class VideoController {
       return;
     }
 
-    await this.db.$transaction(async (tx) => {
-      const now = new Date();
-      // Publication and deletion take the same lock order, fencing a running encoder before cleanup.
-      await tx.$queryRaw`SELECT id FROM "ProcessingJob" WHERE "videoId" = ${id} FOR UPDATE`;
-      const job = await tx.processingJob.findUnique({
-        where: { videoId: id },
-        select: { leaseExpiresAt: true },
-      });
-      const claimed = await tx.video.updateMany({
-        where: {
-          id,
-          userId,
-          status: { in: ["PROCESSING", "READY", "FAILED"] },
-        },
-        data: { status: "DELETING", deletedAt: now },
-      });
-      if (!claimed.count) return;
-      await tx.processingJob.updateMany({
-        where: { videoId: id, status: { in: ["PENDING", "RUNNING"] } },
-        data: { status: "CANCELLED", leaseToken: null, leaseExpiresAt: null },
-      });
-      await tx.shareToken.updateMany({
-        where: { videoId: id, revokedAt: null },
-        data: { revokedAt: now },
-      });
-      const availableAt = new Date(
-        Math.max(now.getTime(), (job?.leaseExpiresAt?.getTime() ?? 0) + 30_000),
-      );
-      await tx.outbox.create({
-        data: { kind: "CLEANUP_VIDEO", videoId: id, payload: {}, availableAt },
-      });
-    });
+    await scheduleVideoDeletion(this.db, userId, id);
   }
 
   @Post(":id/share")
@@ -448,4 +437,45 @@ export class ShareController {
       throw new NotFoundException("This share link is no longer available");
     return this.presenter.video(share.video, share.id, true);
   }
+}
+
+export async function scheduleVideoDeletion(
+  db: Database,
+  userId: string,
+  id: string,
+  expiredBefore?: Date,
+) {
+  await db.$transaction(async (tx) => {
+    const now = new Date();
+    // Publication and deletion take the same lock order, fencing a running encoder before cleanup.
+    await tx.$queryRaw`SELECT id FROM "ProcessingJob" WHERE "videoId" = ${id} FOR UPDATE`;
+    const job = await tx.processingJob.findUnique({
+      where: { videoId: id },
+      select: { leaseExpiresAt: true },
+    });
+    const claimed = await tx.video.updateMany({
+      where: {
+        id,
+        userId,
+        ...(expiredBefore ? { demoExpiresAt: { lte: expiredBefore } } : {}),
+        status: { in: ["PROCESSING", "READY", "FAILED"] },
+      },
+      data: { status: "DELETING", deletedAt: now },
+    });
+    if (!claimed.count) return;
+    await tx.processingJob.updateMany({
+      where: { videoId: id, status: { in: ["PENDING", "RUNNING"] } },
+      data: { status: "CANCELLED", leaseToken: null, leaseExpiresAt: null },
+    });
+    await tx.shareToken.updateMany({
+      where: { videoId: id, revokedAt: null },
+      data: { revokedAt: now },
+    });
+    const availableAt = new Date(
+      Math.max(now.getTime(), (job?.leaseExpiresAt?.getTime() ?? 0) + 30_000),
+    );
+    await tx.outbox.create({
+      data: { kind: "CLEANUP_VIDEO", videoId: id, payload: {}, availableAt },
+    });
+  });
 }

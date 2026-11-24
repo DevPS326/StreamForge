@@ -225,8 +225,13 @@ export class Uploads {
       if (active >= this.config.MAX_ACTIVE_UPLOADS)
         throw new ConflictException("Too many uploads in progress");
 
-      await this.demo.reserveUpload(tx, input.size);
       const videoId = randomUUID();
+      const demoExpiry = await this.demo.reserveUpload(
+        tx,
+        userId,
+        videoId,
+        input.size,
+      );
       const upload = await tx.uploadSession.create({
         include: uploadInclude,
         data: {
@@ -234,9 +239,9 @@ export class Uploads {
           requestKey,
           filename: input.filename,
           ...multipartLayout(input.size),
-          expiresAt: new Date(
-            Date.now() + this.config.UPLOAD_EXPIRY_HOURS * HOUR_MS,
-          ),
+          expiresAt:
+            demoExpiry ??
+            new Date(Date.now() + this.config.UPLOAD_EXPIRY_HOURS * HOUR_MS),
           video: {
             create: {
               id: videoId,
@@ -248,6 +253,7 @@ export class Uploads {
                   .trim()
                   .slice(0, 160) ||
                   "Untitled video"),
+              demoExpiresAt: demoExpiry,
               originalKey: `originals/${videoId}/source`,
               status: "UPLOADING",
               sizeBytes: BigInt(input.size),
@@ -366,7 +372,7 @@ export class Uploads {
     if (distinct.some((partNumber) => partNumber > upload.partCount))
       throw new BadRequestException("Part number exceeds the upload layout");
     const { storageUploadId, partSize, video } = upload;
-    const expiresAt = await this.demo.assertActive(userId);
+    const expiresAt = await this.demo.assertActive(userId, video.id);
     const seconds = expiresAt
       ? Math.max(1, Math.min(30, Math.floor((+expiresAt - Date.now()) / 1000)))
       : 900;
@@ -388,6 +394,7 @@ export class Uploads {
   async complete(userId: string, id: string) {
     const upload = await this.find(userId, id);
     if (upload.status === "COMPLETED") return upload.video;
+    await this.demo.assertActive(userId, upload.videoId);
     if (
       !upload.storageUploadId ||
       !["ACTIVE", "COMPLETING"].includes(upload.status)

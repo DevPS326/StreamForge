@@ -12,6 +12,8 @@ import { z } from "zod";
 import { Database } from "./database";
 import { Storage } from "./storage";
 import { Uploads } from "./uploads";
+import { DEMO_MODE } from "./demo";
+import { scheduleVideoDeletion } from "./videos";
 
 const LEASE_MS = 120_000;
 const POLL_MS = 1_000;
@@ -197,6 +199,7 @@ export class OutboxDispatcher
       const results = await Promise.allSettled([
         this.uploads.reconcile(),
         this.reconcileProcessing(),
+        this.expireDemoVideos(),
       ]);
       for (const result of results) {
         if (result.status === "rejected") {
@@ -213,6 +216,22 @@ export class OutboxDispatcher
           this.reconciling = this.reconcile();
         }, RECONCILE_MS).unref();
     }
+  }
+
+  private async expireDemoVideos() {
+    if (!DEMO_MODE) return;
+    const now = new Date();
+    const expired = await this.db.video.findMany({
+      where: {
+        demoExpiresAt: { lte: now },
+        status: { in: ["PROCESSING", "READY", "FAILED"] },
+      },
+      take: 25,
+      orderBy: { demoExpiresAt: "asc" },
+      select: { id: true, userId: true },
+    });
+    for (const video of expired)
+      await scheduleVideoDeletion(this.db, video.userId, video.id, now);
   }
 
   private async reconcileProcessing() {

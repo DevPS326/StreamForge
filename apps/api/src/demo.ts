@@ -1,5 +1,4 @@
 import {
-  ConflictException,
   Controller,
   Delete,
   Get,
@@ -20,6 +19,7 @@ export const DEMO_FILE_BYTES = 20 * 1024 * 1024;
 export const DEMO_STORAGE_BYTES = 200 * 1024 * 1024;
 export const DEMO_MAX_QUEUE = 5;
 export const DEMO_SLOT_MS = 2 * 60_000;
+const DEMO_WORK_MS = 5 * 60_000;
 const DEMO_DAY_UPLOADS = 5;
 const DEMO_MONTH_UPLOADS = 50;
 const DEMO_DAY_TURNS = 8;
@@ -30,6 +30,21 @@ const STALE_QUEUE_MS = 15 * 60_000;
 // across multiple API instances; they are released on transaction completion.
 const GATE_LOCK = 824120;
 const STORAGE_LOCK = GATE_LOCK;
+
+function quota(reason: string, message: string, retryAt: Date | null = null) {
+  return new HttpException(
+    { reason, message, retryAt: retryAt?.toISOString() ?? null },
+    429,
+  );
+}
+
+function resetAt(now: Date, monthly: boolean) {
+  const year = now.getUTCFullYear();
+  const month = now.getUTCMonth();
+  return monthly
+    ? new Date(Date.UTC(year, month + 1, 1))
+    : new Date(Date.UTC(year, month, now.getUTCDate() + 1));
+}
 
 @Injectable()
 export class DemoGate {
@@ -60,9 +75,10 @@ export class DemoGate {
       });
       if (!ticket && join) {
         if (waiting.length >= DEMO_MAX_QUEUE && active) {
-          throw new HttpException(
+          throw quota(
+            "QUEUE_FULL",
             "The free demo waiting queue is full. Try again later.",
-            429,
+            new Date(+now + 30_000),
           );
         }
         ticket = await tx.demoTurn.create({ data: { userId } });
@@ -76,13 +92,35 @@ export class DemoGate {
           create: { id: 1, dayKey, monthKey },
           update: {},
         });
+        if (
+          usage.monthKey === monthKey &&
+          usage.monthUploads >= DEMO_MONTH_UPLOADS
+        )
+          throw quota(
+            "MONTHLY_UPLOADS",
+            "The monthly upload budget is exhausted.",
+            resetAt(now, true),
+          );
+        if (usage.dayKey === dayKey && usage.dayUploads >= DEMO_DAY_UPLOADS)
+          throw quota(
+            "DAILY_UPLOADS",
+            "The daily upload budget is exhausted.",
+            resetAt(now, false),
+          );
         const dayTurns = (usage.dayKey === dayKey ? usage.dayTurns : 0) + 1;
         const monthTurns =
           (usage.monthKey === monthKey ? usage.monthTurns : 0) + 1;
-        if (dayTurns > DEMO_DAY_TURNS || monthTurns > DEMO_MONTH_TURNS)
-          throw new HttpException(
-            "Free demo session budget reached. Access resets in the next quota window.",
-            429,
+        if (monthTurns > DEMO_MONTH_TURNS)
+          throw quota(
+            "MONTHLY_TURNS",
+            "The monthly demo turn budget is exhausted.",
+            resetAt(now, true),
+          );
+        if (dayTurns > DEMO_DAY_TURNS)
+          throw quota(
+            "DAILY_TURNS",
+            "The daily demo turn budget is exhausted.",
+            resetAt(now, false),
           );
         await tx.demoUsage.update({
           where: { id: 1 },
@@ -96,7 +134,7 @@ export class DemoGate {
           },
         });
         const first = waiting[0]!;
-        const until = new Date(+now + DEMO_SLOT_MS);
+        const until = new Date(+now + DEMO_WORK_MS);
         await tx.demoTurn.update({
           where: { userId: first.userId },
           data: { expiresAt: until },
@@ -111,6 +149,11 @@ export class DemoGate {
           state: "active" as const,
           position: 0,
           expiresAt: ticket.expiresAt.toISOString(),
+          stage: ticket.readyAt
+            ? "download"
+            : ticket.videoId
+              ? "working"
+              : "upload",
         };
       const position = waiting.findIndex((item) => item.userId === userId) + 1;
       return {
@@ -138,19 +181,32 @@ export class DemoGate {
 
   async leave(userId: string) {
     if (!DEMO_MODE) return;
-    // Keep active slots reserved until expiry: presigned downloads cannot be revoked early.
+    // An unused turn has issued no upload or playback authorization.
     await this.db.demoTurn.deleteMany({
       where: {
         userId,
-        OR: [{ expiresAt: null }, { expiresAt: { lte: new Date() } }],
+        OR: [
+          { expiresAt: null },
+          { expiresAt: { lte: new Date() } },
+          { videoId: null },
+        ],
       },
     });
   }
 
-  async assertActive(userId: string): Promise<Date | undefined> {
+  async assertActive(
+    userId: string,
+    videoId?: string,
+    ready = false,
+  ): Promise<Date | undefined> {
     if (!DEMO_MODE) return;
     const turn = await this.db.demoTurn.findUnique({ where: { userId } });
-    if (!turn?.expiresAt || turn.expiresAt <= new Date())
+    if (
+      !turn?.expiresAt ||
+      turn.expiresAt <= new Date() ||
+      (videoId && turn.videoId !== videoId) ||
+      (ready && !turn.readyAt)
+    )
       throw new HttpException(
         "Your free demo slot has expired. Join the waiting queue.",
         429,
@@ -158,20 +214,54 @@ export class DemoGate {
     return turn.expiresAt;
   }
 
-  async reserveMediaRequest(userId: string) {
+  async reserveMediaRequest(userId: string, videoId: string) {
     if (!DEMO_MODE) return;
     const result = await this.db.demoTurn.updateMany({
-      where: { userId, expiresAt: { gt: new Date() }, mediaReads: { lt: 100 } },
+      where: {
+        userId,
+        videoId,
+        readyAt: { not: null },
+        expiresAt: { gt: new Date() },
+        mediaReads: { lt: 100 },
+      },
       data: { mediaReads: { increment: 1 } },
     });
     if (!result.count)
       throw new HttpException("Demo streaming request cap reached.", 429);
   }
 
-  async reserveDownload(userId: string) {
+  async reserveEgress(userId: string, videoId: string, bytes: number) {
+    if (!DEMO_MODE) return;
+    const limit = 128 * 1024 * 1024;
+    if (!Number.isSafeInteger(bytes) || bytes <= 0 || bytes > limit)
+      throw new HttpException("Invalid demo transfer size", 429);
+    const result = await this.db.demoTurn.updateMany({
+      where: {
+        userId,
+        videoId,
+        readyAt: { not: null },
+        expiresAt: { gt: new Date() },
+        egressBytes: { lte: limit - bytes },
+      },
+      data: { egressBytes: { increment: bytes } },
+    });
+    if (!result.count)
+      throw new HttpException(
+        "The demo transfer budget is exhausted or expired.",
+        429,
+      );
+  }
+
+  async reserveDownload(userId: string, videoId: string) {
     if (!DEMO_MODE) return;
     const result = await this.db.demoTurn.updateMany({
-      where: { userId, expiresAt: { gt: new Date() }, downloads: { lt: 1 } },
+      where: {
+        userId,
+        videoId,
+        readyAt: { not: null },
+        expiresAt: { gt: new Date() },
+        downloads: { lt: 1 },
+      },
       data: { downloads: { increment: 1 } },
     });
     if (!result.count)
@@ -181,20 +271,32 @@ export class DemoGate {
       );
   }
 
-  async reserveUpload(tx: Prisma.TransactionClient, size: number) {
+  async reserveUpload(
+    tx: Prisma.TransactionClient,
+    userId: string,
+    videoId: string,
+    size: number,
+  ) {
     if (!DEMO_MODE) return;
     if (size > DEMO_FILE_BYTES)
       throw new HttpException("Free demo limit: 20 MiB per video.", 413);
     await tx.$queryRaw`SELECT 1::integer AS acquired FROM pg_advisory_xact_lock(${STORAGE_LOCK}::bigint)`;
+    const turn = await tx.demoTurn.findUnique({ where: { userId } });
+    if (!turn?.expiresAt || turn.expiresAt <= new Date() || turn.videoId)
+      throw new HttpException("An active demo turn allows one video.", 429);
     // Conservative 4x reservation covers an original plus its derived rendition.
     // All not-yet-cleaned video records count even when processing failed.
     const total = await tx.video.aggregate({
       where: { status: { not: "DELETED" } },
       _sum: { sizeBytes: true },
+      _count: true,
     });
-    const reserved = ((total._sum.sizeBytes ?? 0n) + BigInt(size)) * 4n;
+    const reserved =
+      ((total._sum.sizeBytes ?? 0n) + BigInt(size)) * 4n +
+      BigInt(total._count + 1) * 1048576n;
     if (reserved > BigInt(DEMO_STORAGE_BYTES))
-      throw new ConflictException(
+      throw quota(
+        "GLOBAL_STORAGE",
         "Global free-demo storage budget reached (200 MiB).",
       );
     const now = new Date();
@@ -208,10 +310,17 @@ export class DemoGate {
     const dayUploads = (usage.dayKey === dayKey ? usage.dayUploads : 0) + 1;
     const monthUploads =
       (usage.monthKey === monthKey ? usage.monthUploads : 0) + 1;
-    if (dayUploads > DEMO_DAY_UPLOADS || monthUploads > DEMO_MONTH_UPLOADS)
-      throw new HttpException(
-        "Free demo upload quota reached. Try in a later quota window.",
-        429,
+    if (monthUploads > DEMO_MONTH_UPLOADS)
+      throw quota(
+        "MONTHLY_UPLOADS",
+        "The monthly upload budget is exhausted.",
+        resetAt(now, true),
+      );
+    if (dayUploads > DEMO_DAY_UPLOADS)
+      throw quota(
+        "DAILY_UPLOADS",
+        "The daily upload budget is exhausted.",
+        resetAt(now, false),
       );
     await tx.demoUsage.update({
       where: { id: 1 },
@@ -224,6 +333,8 @@ export class DemoGate {
         monthTurns: usage.monthKey === monthKey ? usage.monthTurns : 0,
       },
     });
+    await tx.demoTurn.update({ where: { userId }, data: { videoId } });
+    return turn.expiresAt;
   }
 }
 

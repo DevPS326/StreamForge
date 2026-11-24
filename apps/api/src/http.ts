@@ -113,6 +113,25 @@ export class ApiErrors implements ExceptionFilter {
     if (response.headersSent) return;
 
     if (error instanceof HttpException) {
+      const body = error.getResponse();
+      if (
+        error.getStatus() === 429 &&
+        typeof body === "object" &&
+        "reason" in body
+      ) {
+        const retryAt = "retryAt" in body ? body.retryAt : null;
+        if (typeof retryAt === "string")
+          response.setHeader(
+            "Retry-After",
+            Math.max(1, Math.ceil((Date.parse(retryAt) - Date.now()) / 1000)),
+          );
+        response.status(429).json({
+          ...body,
+          statusCode: 429,
+          requestId: response.locals.requestId,
+        });
+        return;
+      }
       return reply(response, error.getStatus(), error.message);
     }
     const initializing =

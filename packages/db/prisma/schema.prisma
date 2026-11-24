@@ -91,6 +91,9 @@ model Video {
   shares          ShareToken[]
   outbox          Outbox[]
 
+  demoExpiresAt DateTime?
+
+  @@index([demoExpiresAt])
   @@index([userId, createdAt, id])
   @@index([userId, status])
 }
@@ -178,6 +181,9 @@ model DemoTurn {
   userId   String   @id
   joinedAt DateTime @default(now())
   expiresAt DateTime?
+  videoId String? @unique
+  readyAt DateTime?
+  egressBytes Int @default(0)
   mediaReads Int @default(0)
   downloads Int @default(0)
 

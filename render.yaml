@@ -42,7 +42,7 @@ services:
       - key: WORKER_MAX_DURATION_SECONDS
         value: "45"
       - key: WORKER_TIMEOUT_SECONDS
-        value: "900"
+        value: "180"
       - key: WORKER_MAX_ATTEMPTS
         value: "2"
       - key: WORKER_TEMP_BUDGET_BYTES

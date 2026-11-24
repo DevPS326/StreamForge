@@ -1,11 +1,17 @@
 import { execFileSync } from "node:child_process";
 import { randomBytes, randomUUID } from "node:crypto";
-import { readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 
 const origin =
   process.env.SMOKE_ORIGIN || "https://stream-forge-flame.vercel.app";
-const file = "/tmp/streamforge-smoke.mp4";
+const scratch = mkdtempSync(join(tmpdir(), "streamforge-smoke-"));
+const file = join(scratch, "source.mp4");
+const apiOrigin =
+  process.env.SMOKE_API_ORIGIN ||
+  "https://streamforge-api-devps326.onrender.com";
 const password = randomBytes(24).toString("base64url");
 const email =
   "smoke-" +
@@ -45,10 +51,9 @@ async function call(path, options = {}) {
 }
 
 async function main() {
-  const warm = await fetch(
-    "https://streamforge-api-devps326.onrender.com/health/live",
-    { signal: AbortSignal.timeout(100_000) },
-  );
+  const warm = await fetch(apiOrigin + "/health/live", {
+    signal: AbortSignal.timeout(100_000),
+  });
   if (!warm.ok)
     throw new Error("Backend did not become live: HTTP " + warm.status);
   console.log("Backend healthy");
@@ -91,7 +96,29 @@ async function main() {
     throw new Error(
       "Smoke test couldn't obtain free slot: " + JSON.stringify(turn),
     );
+  if (turn.stage !== "upload")
+    throw new Error("Expected an upload stage after admission");
   console.log("Demo slot acquired");
+  let waitingCookie;
+  if (process.env.SMOKE_VERIFY_FIFO === "1") {
+    const firstCookie = cookie;
+    cookie = "";
+    try {
+      await call("/auth/register", {
+        method: "POST",
+        body: {
+          email: "waiting-" + randomUUID() + "@example.invalid",
+          password: randomBytes(24).toString("base64url"),
+        },
+      });
+      waitingCookie = cookie;
+      const waiting = await call("/demo/join", { method: "POST" });
+      if (waiting.state !== "queued" || waiting.position !== 1)
+        throw new Error("Second user was admitted before the first turn ended");
+    } finally {
+      cookie = firstCookie;
+    }
+  }
 
   const session = await call("/uploads", {
     method: "POST",
@@ -115,8 +142,8 @@ async function main() {
     body: bytes,
     signal: AbortSignal.timeout(60_000),
   });
-  if (!part.ok) throw new Error("R2 PUT HTTP " + part.status);
-  console.log("R2 multipart PUT succeeded");
+  if (!part.ok) throw new Error("Object storage PUT HTTP " + part.status);
+  console.log("Object storage multipart PUT succeeded");
 
   await call("/uploads/" + session.id + "/complete", { method: "POST" });
   console.log("Upload committed, waiting for worker");
@@ -132,6 +159,10 @@ async function main() {
       "Video processing not READY: " +
         JSON.stringify({ status: video?.status, id }).slice(0, 200),
     );
+  const ready = await call("/demo/status");
+  const remaining = Date.parse(ready.expiresAt) - Date.now();
+  if (ready.stage !== "download" || remaining < 110_000 || remaining > 122_000)
+    throw new Error("READY did not open a new two-minute download window");
   if (!video.playbackUrl)
     throw new Error("READY video missing HLS playback URL");
   const manifest = await fetch(video.playbackUrl, {
@@ -184,9 +215,35 @@ async function main() {
     throw new Error("Repeated download was not blocked: " + second.status);
   console.log("Second download rejected with HTTP 429");
 
-  await call("/videos/" + id, { method: "DELETE" });
+  if (!waitingCookie) await call("/videos/" + id, { method: "DELETE" });
+  if (waitingCookie) {
+    const firstCookie = cookie;
+    cookie = waitingCookie;
+    try {
+      const waiting = await call("/demo/status");
+      if (waiting.state !== "queued")
+        throw new Error("The active download window released admission early");
+      await sleep(Math.max(0, Date.parse(ready.expiresAt) - Date.now()) + 1000);
+      const next = await call("/demo/status");
+      if (next.state !== "active" || next.stage !== "upload")
+        throw new Error("FIFO did not admit the second user after expiry");
+      const expired = await fetch(new URL(dl.url, origin), {
+        headers: { Cookie: firstCookie },
+      });
+      if (expired.ok)
+        throw new Error("Expired download authorization still worked");
+      const oldMedia = await fetch(video.playbackUrl, {
+        signal: AbortSignal.timeout(20_000),
+      });
+      if (oldMedia.ok) throw new Error("Expired HLS access still worked");
+      console.log("FIFO transition at download expiry verified");
+    } finally {
+      await call("/demo/leave", { method: "DELETE" }).catch(() => undefined);
+      cookie = firstCookie;
+    }
+  }
   console.log(
-    "PASS: registered, queued, uploaded, transcoded, downloaded, duplicate blocked, deletion queued",
+    "PASS: registered, queued, uploaded, transcoded, downloaded, duplicate blocked, cleanup verified by expiry or requested",
   );
 }
 
@@ -199,7 +256,9 @@ main()
     process.exitCode = 1;
   })
   .finally(async () => {
+    if (cookie && id)
+      await call("/videos/" + id, { method: "DELETE" }).catch(() => undefined);
     if (cookie)
       await call("/demo/leave", { method: "DELETE" }).catch(() => undefined);
-    rmSync(file, { force: true });
+    rmSync(scratch, { force: true, recursive: true });
   });

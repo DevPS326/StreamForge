@@ -22,6 +22,7 @@ export interface Video {
   playbackUrl: string | null;
   thumbnailUrl: string | null;
   shared: boolean;
+  sharingEnabled: boolean;
 }
 
 export interface VideoList {
@@ -53,6 +54,8 @@ export class ApiError extends Error {
   constructor(
     public readonly status: number,
     message: string,
+    public readonly reason?: string,
+    public readonly retryAt?: string,
   ) {
     super(message);
     this.name = "ApiError";
@@ -120,6 +123,8 @@ export async function api<T>(
         : typeof message === "string"
           ? message
           : fallback,
+      typeof data?.reason === "string" ? data.reason : undefined,
+      typeof data?.retryAt === "string" ? data.retryAt : undefined,
     );
   }
   return data as T;

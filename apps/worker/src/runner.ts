@@ -202,7 +202,17 @@ export class ProcessingWorker {
     const signal = AbortSignal.any([
       this.stop,
       operation.signal,
-      AbortSignal.timeout(this.config.timeoutMs),
+      AbortSignal.timeout(
+        Math.max(
+          1,
+          Math.min(
+            this.config.timeoutMs,
+            job.demoExpiresAt
+              ? +job.demoExpiresAt - Date.now()
+              : this.config.timeoutMs,
+          ),
+        ),
+      ),
     ]);
     let leaseGuard: ReturnType<typeof setTimeout> | undefined;
     const renewGuard = (deadline: Date) => {
@@ -284,6 +294,18 @@ export class ProcessingWorker {
       releaseOutput = this.budget.reserve(outputBytes);
       await requireDiskSpace(this.config.tempDir, outputBytes);
       const encoded = await encodeMedia(sourcePath, output, metadata, options);
+      if (
+        process.env.DEMO_FREE_MODE === "1" &&
+        encoded.artifacts.reduce(
+          (bytes, artifact) => bytes + artifact.length,
+          0,
+        ) >
+          sourceBytes * 3 + 1024 * 1024
+      )
+        throw new MediaError(
+          "MEDIA_LIMIT_EXCEEDED",
+          "Processed files exceed the demo storage reservation",
+        );
       remoteStarted = true;
       await this.storage.uploadVerified(
         prefix,

@@ -51,6 +51,26 @@ jobs:
           WORKER_TEST_DATABASE_URL: postgresql://streamforge:streamforge@localhost:5432/streamforge?schema=public
           WORKER_TEST_ELASTICMQ_ENDPOINT: http://localhost:9324
           WORKER_TEST_CRASH: "1"
+      - name: Verify free demo against isolated PostgreSQL
+        run: |
+          docker compose exec -T postgres createdb -U streamforge streamforge_demo_verify
+          export DATABASE_URL='postgresql://streamforge:streamforge@localhost:5432/streamforge_demo_verify?schema=public'
+          export DEMO_FREE_MODE=1 PORT=4001 API_PUBLIC_URL=http://localhost:4001
+          export WORKER_HEALTH_PORT=3012 WORKER_MAX_DURATION_SECONDS=45 WORKER_MAX_ATTEMPTS=2 WORKER_TIMEOUT_SECONDS=180
+          pnpm db:migrate
+          node --env-file=.env scripts/start-free-demo.mjs > demo.log 2>&1 &
+          service=$!
+          trap 'kill "$service" 2>/dev/null || true' EXIT
+          for i in $(seq 1 45); do
+            if curl -fsS http://127.0.0.1:3012/ready && curl -fsS http://localhost:4001/health/ready; then
+              SMOKE_ORIGIN=http://localhost:4001 node tests/integration/demo-quotas.mjs
+              SMOKE_ORIGIN=http://localhost:4001 SMOKE_API_ORIGIN=http://localhost:4001 SMOKE_VERIFY_FIFO=1 node scripts/live-smoke.mjs
+              exit $?
+            fi
+            sleep 2
+          done
+          cat demo.log
+          exit 1
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
@@ -59,6 +79,7 @@ jobs:
             playwright-report
             test-results
             web.log
+            demo.log
       - run: docker compose --profile app down -v
         if: always()
 

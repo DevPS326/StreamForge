@@ -163,7 +163,7 @@ export function VideoDetail({
         "/videos/" + video.id + "/download",
       );
       const link = document.createElement("a");
-      link.href = result.url;
+      link.href = mediaUrl(result.url) ?? result.url;
       link.rel = "noopener noreferrer";
       document.body.appendChild(link);
       link.click();
@@ -260,6 +260,17 @@ export function VideoDetail({
               <Pencil />
               Rename
             </Button>
+            {video.status === "READY" && video.sharingEnabled && (
+              <Button
+                type="button"
+                size="small"
+                onClick={() => show("share")}
+                aria-label="Share video"
+              >
+                <Share2 />
+                Share
+              </Button>
+            )}
             {video.status === "READY" && (
               <Button
                 type="button"

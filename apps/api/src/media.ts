@@ -149,6 +149,7 @@ export class VideoPresenter {
       width: video.width,
       height: video.height,
       shared,
+      sharingEnabled: !DEMO_MODE,
       playbackUrl,
       thumbnailUrl,
     };
@@ -224,15 +225,17 @@ export class MediaController {
       select: { id: true, userId: true },
     });
     if (!video) throw new NotFoundException("Media is not available");
+    const deadline = DEMO_MODE
+      ? await this.gate.assertActive(video.userId, id, true)
+      : undefined;
     if (DEMO_MODE) {
-      await this.gate.assertActive(video.userId);
-      await this.gate.reserveMediaRequest(video.userId);
+      await this.gate.reserveMediaRequest(video.userId, id);
     }
 
     response.setHeader("Cache-Control", "private, no-store");
     const key = `${grant.prefix}/${path}`;
     const isManifest = path.endsWith(".m3u8");
-    if (this.config.CLOUDFRONT_URL && !isManifest) {
+    if (!DEMO_MODE && this.config.CLOUDFRONT_URL && !isManifest) {
       response.redirect(302, this.cloudfrontUrl(key, grant.expiresAt));
       return;
     }
@@ -241,15 +244,32 @@ export class MediaController {
       throw new BadRequestException("Invalid byte range");
 
     const cancellation = new AbortController();
+    const signal = deadline
+      ? AbortSignal.any([
+          cancellation.signal,
+          AbortSignal.timeout(Math.max(1, +deadline - Date.now())),
+        ])
+      : cancellation.signal;
     const disconnect = () => {
       if (!response.writableEnded) cancellation.abort();
     };
     response.once("close", disconnect);
     try {
-      const object = await this.storage.get(key, range, cancellation.signal);
+      const object = await this.storage.get(key, range, signal);
       if (!(object.Body instanceof Readable))
         throw new Error("Storage returned an invalid media response");
 
+      try {
+        if (DEMO_MODE)
+          await this.gate.reserveEgress(
+            video.userId,
+            id,
+            object.ContentLength ?? 0,
+          );
+      } catch (error) {
+        object.Body.destroy();
+        throw error;
+      }
       if (isManifest) {
         if (
           !object.ContentLength ||
@@ -260,7 +280,11 @@ export class MediaController {
         }
         const m3u8 = await object.Body.transformToString();
         const manifest = rewritePlaylist(m3u8, path, (child) => {
-          if (this.config.CLOUDFRONT_URL && !child.endsWith(".m3u8")) {
+          if (
+            !DEMO_MODE &&
+            this.config.CLOUDFRONT_URL &&
+            !child.endsWith(".m3u8")
+          ) {
             return this.cloudfrontUrl(
               `${grant.prefix}/${child}`,
               grant.expiresAt,
@@ -282,9 +306,12 @@ export class MediaController {
       response.setHeader("Accept-Ranges", "bytes");
       if (object.ContentLength !== undefined)
         response.setHeader("Content-Length", object.ContentLength);
-      await pipeline(object.Body, response);
+      await pipeline(object.Body, response, { signal });
     } catch (error) {
       if (cancellation.signal.aborted || response.headersSent) return;
+      if (signal.aborted)
+        throw new HttpException("The demo download window expired.", 410);
+      if (error instanceof HttpException) throw error;
       if (storageStatus(error, "NoSuchKey", 404))
         throw new NotFoundException("Media is not available");
       if (storageStatus(error, "InvalidRange", 416))
