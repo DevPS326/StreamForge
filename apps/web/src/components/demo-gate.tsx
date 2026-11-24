@@ -9,6 +9,7 @@ type Turn = {
   state: "none" | "queued" | "active";
   position: number;
   expiresAt: string | null;
+  stage?: "upload" | "working" | "download";
 };
 
 export function DemoGate({ children }: { children: ReactNode }) {
@@ -39,17 +40,10 @@ export function DemoGate({ children }: { children: ReactNode }) {
         }
       } catch (err) {
         if (!closed) {
-          if (
-            err instanceof ApiError &&
-            err.status === 429 &&
-            /free demo session budget reached/i.test(err.message)
-          ) {
-            const today = new Date();
-            quotaBlockedUntil = Date.UTC(
-              today.getUTCFullYear(),
-              today.getUTCMonth(),
-              today.getUTCDate() + 1,
-            );
+          if (err instanceof ApiError && err.status === 429) {
+            quotaBlockedUntil = err.retryAt
+              ? Date.parse(err.retryAt)
+              : Date.now() + 30_000;
             setQuotaResetAt(quotaBlockedUntil);
           }
           setError(message(err));
@@ -76,7 +70,9 @@ export function DemoGate({ children }: { children: ReactNode }) {
       ? 0
       : Math.max(
           0,
-          Math.ceil((new Date(turn.expiresAt).getTime() - now) / 1000),
+          Math.ceil(
+            (new Date(turn.expiresAt).getTime() - (now || Date.now())) / 1000,
+          ),
         );
 
   const budgetReached = quotaResetAt !== null && quotaResetAt > now;
@@ -109,29 +105,29 @@ export function DemoGate({ children }: { children: ReactNode }) {
               : "Joining free demo…"}
         </h1>
         <p className="text-muted">
-          StreamForge allows one active user for two minutes. All other users
-          wait in FIFO order. The slot automatically moves to the next person.
+          One user uploads and processes at a time. Your two-minute download
+          window starts when processing finishes.
         </p>
         {budgetReached ? (
           <p className="text-sm text-muted" role="status">
-            To prevent unexpected charges, new sessions are paused until the
-            next quota window. Daily limits reset at 05:30 AM IST. The site
-            will automatically retry then. If the monthly quota is exhausted,
-            access resumes in the next month.
+            {error}{" "}
+            {quotaResetAt &&
+              `Next check: ${new Date(quotaResetAt).toLocaleString("en-GB", { timeZone: "UTC", timeZoneName: "short" })} ? ${new Date(quotaResetAt).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", timeZoneName: "short" })}`}
           </p>
         ) : turn?.state === "queued" ? (
           <p className="text-xl font-semibold">Position #{turn.position}</p>
         ) : (
           <LoadingState label="Checking next available slot…" />
         )}
-        {error && (
+        {error && !budgetReached && (
           <p role="alert" className="text-sm text-danger">
             {error}
           </p>
         )}
         <p className="text-xs text-muted">
-          Hard demo limits: 20 MiB/file; 200 MiB global storage reservation; 5
-          uploads/day; 50/month; at most 5 waiting users. No paid upgrade.
+          Hard demo limits: 20 MiB/file, 45 seconds, up to 1280 ? 720 input,
+          480p output; 200 MiB global storage reservation; 5 uploads/day;
+          50/month; at most 5 waiting users. No paid upgrade.
         </p>
       </section>
     </main>
