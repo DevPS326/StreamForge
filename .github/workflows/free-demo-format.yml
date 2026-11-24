@@ -1,0 +1,34 @@
+name: Format free-demo implementation
+on:
+  push:
+    branches: [feat/free-demo-hardcaps]
+permissions:
+  contents: write
+jobs:
+  format:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/free-demo-hardcaps
+          persist-credentials: true
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Format changed sources
+        run: |
+          pnpm exec prettier --write             apps/api/src/demo.ts             apps/api/src/main.ts             apps/api/src/auth.ts             apps/api/src/uploads.ts             apps/api/src/media.ts             apps/api/src/storage.ts             apps/api/src/videos.ts             apps/worker/src/pg-queue.ts             apps/worker/src/index.ts             apps/worker/src/runner.ts             apps/worker/src/media.ts             apps/web/src/components/demo-gate.tsx             apps/web/src/components/workspace.tsx             apps/web/src/components/video-detail.tsx             apps/web/src/components/upload-page.tsx             apps/web/src/lib/uploads.ts             scripts/start-free-demo.mjs             render.yaml
+      - name: Commit formatting
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if ! git diff --cached --quiet; then
+            git commit -m "style: format free demo changes"
+            git push origin HEAD:feat/free-demo-hardcaps
+          fi
