@@ -132,10 +132,23 @@ async function main() {
       "Video processing not READY: " +
         JSON.stringify({ status: video?.status, id }).slice(0, 200),
     );
-  console.log(
-    "Worker transcoding READY; playback URL present: " +
-      Boolean(video.playbackUrl),
-  );
+  if (!video.playbackUrl) throw new Error("READY video missing HLS playback URL");
+  const manifest = await fetch(video.playbackUrl, { signal: AbortSignal.timeout(30_000) });
+  if (!manifest.ok) throw new Error("HLS manifest HTTP " + manifest.status);
+  const manifestText = await manifest.text();
+  if (!manifestText.startsWith("#EXTM3U")) throw new Error("Invalid HLS master manifest");
+  const variantUrl = manifestText.split(/\r?\n/).find(line => line.trim() && !line.trim().startsWith("#"));
+  if (!variantUrl) throw new Error("No HLS variant URL in master manifest");
+  const variantResponse = await fetch(new URL(variantUrl, video.playbackUrl), { signal: AbortSignal.timeout(30_000) });
+  if (!variantResponse.ok) throw new Error("HLS variant HTTP " + variantResponse.status);
+  const variant = await variantResponse.text();
+  if (!variant.startsWith("#EXTM3U")) throw new Error("Invalid variant manifest");
+  const segmentUrl = variant.split(/\r?\n/).find(line => line.trim() && !line.trim().startsWith("#"));
+  if (!segmentUrl) throw new Error("HLS variant has no media segment");
+  const segmentResponse = await fetch(new URL(segmentUrl, variantUrl), { signal: AbortSignal.timeout(30_000) });
+  if (!segmentResponse.ok) throw new Error("HLS segment HTTP " + segmentResponse.status);
+  if ((await segmentResponse.arrayBuffer()).byteLength < 100) throw new Error("HLS segment empty");
+  console.log("HLS master, variant, and media segment verified");
 
   const dl = await call("/videos/" + id + "/download");
   const response = await fetch(new URL(dl.url, origin), {
