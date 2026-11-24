@@ -58,11 +58,10 @@ const MIME_TYPES: Record<string, string> = {
   avi: "video/x-msvideo",
 };
 const activePhases = new Set<Phase>(["queued", "uploading", "finalizing"]);
-const workersPerFile = 3;
-const maxFilesAtOnce = 2;
+const workersPerFile = 1;
+const maxFilesAtOnce = 1;
 const hashChunkSize = 1024 * 1024;
-export const maxFileBytes =
-  Number(process.env.NEXT_PUBLIC_MAX_UPLOAD_BYTES) || 5 * 1024 ** 3;
+export const maxFileBytes = 20 * 1024 ** 2;
 
 export const acceptedFiles = Object.keys(MIME_TYPES)
   .map((extension) => "." + extension)
