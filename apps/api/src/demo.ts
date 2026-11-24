@@ -77,13 +77,20 @@ export class DemoGate {
           update: {},
         });
         const dayTurns = (usage.dayKey === dayKey ? usage.dayTurns : 0) + 1;
-        const monthTurns = (usage.monthKey === monthKey ? usage.monthTurns : 0) + 1;
+        const monthTurns =
+          (usage.monthKey === monthKey ? usage.monthTurns : 0) + 1;
         if (dayTurns > DEMO_DAY_TURNS || monthTurns > DEMO_MONTH_TURNS)
-          throw new HttpException("Free demo session budget reached. Access resets in the next quota window.", 429);
+          throw new HttpException(
+            "Free demo session budget reached. Access resets in the next quota window.",
+            429,
+          );
         await tx.demoUsage.update({
           where: { id: 1 },
           data: {
-            dayKey, monthKey, dayTurns, monthTurns,
+            dayKey,
+            monthKey,
+            dayTurns,
+            monthTurns,
             dayUploads: usage.dayKey === dayKey ? usage.dayUploads : 0,
             monthUploads: usage.monthKey === monthKey ? usage.monthUploads : 0,
           },
@@ -157,7 +164,8 @@ export class DemoGate {
       where: { userId, expiresAt: { gt: new Date() }, mediaReads: { lt: 100 } },
       data: { mediaReads: { increment: 1 } },
     });
-    if (!result.count) throw new HttpException("Demo streaming request cap reached.", 429);
+    if (!result.count)
+      throw new HttpException("Demo streaming request cap reached.", 429);
   }
 
   async reserveDownload(userId: string) {
@@ -166,7 +174,11 @@ export class DemoGate {
       where: { userId, expiresAt: { gt: new Date() }, downloads: { lt: 1 } },
       data: { downloads: { increment: 1 } },
     });
-    if (!result.count) throw new HttpException("One private download per demo slot. Rejoin the queue to download again.", 429);
+    if (!result.count)
+      throw new HttpException(
+        "One private download per demo slot. Rejoin the queue to download again.",
+        429,
+      );
   }
 
   async reserveUpload(tx: Prisma.TransactionClient, size: number) {
@@ -204,7 +216,10 @@ export class DemoGate {
     await tx.demoUsage.update({
       where: { id: 1 },
       data: {
-        dayKey, monthKey, dayUploads, monthUploads,
+        dayKey,
+        monthKey,
+        dayUploads,
+        monthUploads,
         dayTurns: usage.dayKey === dayKey ? usage.dayTurns : 0,
         monthTurns: usage.monthKey === monthKey ? usage.monthTurns : 0,
       },
