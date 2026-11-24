@@ -37,7 +37,7 @@ export class DemoGate {
 
   private async coordinate(userId: string, join: boolean) {
     return this.db.$transaction(async (tx) => {
-      await tx.$queryRaw`SELECT pg_advisory_xact_lock(${GATE_LOCK})`;
+      await tx.$queryRaw`SELECT 1::integer AS acquired FROM pg_advisory_xact_lock(${GATE_LOCK}::bigint)`;
       const now = new Date();
       await tx.demoTurn.deleteMany({
         where: {
@@ -185,7 +185,7 @@ export class DemoGate {
     if (!DEMO_MODE) return;
     if (size > DEMO_FILE_BYTES)
       throw new HttpException("Free demo limit: 20 MiB per video.", 413);
-    await tx.$queryRaw`SELECT pg_advisory_xact_lock(${STORAGE_LOCK})`;
+    await tx.$queryRaw`SELECT 1::integer AS acquired FROM pg_advisory_xact_lock(${STORAGE_LOCK}::bigint)`;
     // Conservative 4x reservation covers an original plus its derived rendition.
     // All not-yet-cleaned video records count even when processing failed.
     const total = await tx.video.aggregate({
