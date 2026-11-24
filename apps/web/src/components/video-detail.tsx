@@ -9,7 +9,6 @@ import {
   CloudUpload,
   Film,
   Folder,
-  Link2,
   LockKeyhole,
   Pencil,
   Share2,
