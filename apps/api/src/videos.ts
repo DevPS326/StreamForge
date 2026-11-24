@@ -13,6 +13,7 @@ import {
   Post,
   Query,
   Req,
+  Res,
   UseGuards,
 } from "@nestjs/common";
 import {
@@ -24,6 +25,9 @@ import {
 } from "@nestjs/swagger";
 import type { Prisma, Video } from "@streamforge/db";
 import { z } from "zod";
+import type { Response } from "express";
+import { Readable } from "node:stream";
+import { pipeline } from "node:stream/promises";
 import {
   SessionGuard,
   digest,
@@ -207,29 +211,52 @@ export class VideoController {
 
   @Get(":id/download")
   @ApiParam({ name: "id", format: "uuid" })
-  @ApiOperation({
-    summary: "Issue a two-minute private, single-slot download link",
-  })
-  async download(
-    @Req() request: AuthenticatedRequest,
-    @Param("id") idParam: string,
-  ) {
+  @ApiOperation({ summary: "Issue private download access bounded by the active demo slot" })
+  async download(@Req() request: AuthenticatedRequest, @Param("id") idParam: string) {
     const id = validate(uuid, idParam);
     const video = await this.db.video.findFirst({
       where: { id, userId: request.auth.user.id, status: "READY" },
-      select: { originalKey: true, title: true, mimeType: true },
+      select: { id: true },
     });
     if (!video) throw new NotFoundException("Processed video is not ready");
     const ends = await this.gate.assertActive(request.auth.user.id);
     const seconds = ends ? Math.floor((+ends - Date.now()) / 1000) : 120;
     if (seconds < 1) throw new ConflictException("Your download slot expired");
-    const extension = video.mimeType === "video/mp4" ? ".mp4" : "";
-    const url = await this.storage.signDownload(
-      video.originalKey,
-      video.title + extension,
-      Math.min(120, seconds),
-    );
-    return { url, expiresInSeconds: Math.min(120, seconds) };
+    return {
+      url: `/api/v1/videos/${id}/download-file`,
+      expiresInSeconds: Math.min(120, seconds),
+    };
+  }
+
+  @Get(":id/download-file")
+  @ApiParam({ name: "id", format: "uuid" })
+  @ApiOperation({ summary: "Metered private download, limited to one request per demo slot" })
+  async downloadFile(
+    @Req() request: AuthenticatedRequest,
+    @Res() response: Response,
+    @Param("id") idParam: string,
+  ) {
+    const id = validate(uuid, idParam);
+    const video = await this.db.video.findFirst({
+      where: { id, userId: request.auth.user.id, status: "READY" },
+      select: { originalKey: true, title: true, mimeType: true, sizeBytes: true },
+    });
+    if (!video) throw new NotFoundException("Processed video is not ready");
+    await this.gate.assertActive(request.auth.user.id);
+    await this.gate.reserveDownload(request.auth.user.id);
+    const object = await this.storage.get(video.originalKey);
+    if (!(object.Body instanceof Readable))
+      throw new ConflictException("Video download is not available");
+    const filename = video.title.replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 100) || "video";
+    response.setHeader("Content-Type", video.mimeType);
+    response.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    response.setHeader("Cache-Control", "private, no-store");
+    response.setHeader("Content-Length", video.sizeBytes.toString());
+    try {
+      await pipeline(object.Body, response);
+    } finally {
+      object.Body.destroy();
+    }
   }
 
   @Patch(":id")
