@@ -7,8 +7,8 @@ services:
     region: singapore
     repo: https://github.com/DevPS326/StreamForge
     branch: main
-    buildCommand: npm install -g pnpm@11.29.0 && pnpm install --frozen-lockfile && pnpm db:generate && pnpm --filter @streamforge/api build
-    startCommand: pnpm --filter @streamforge/db migrate && node apps/api/dist/main.js
+    buildCommand: npm install -g pnpm@11.29.0 && pnpm install --frozen-lockfile && pnpm db:generate && pnpm --filter @streamforge/api build && pnpm --filter @streamforge/worker build
+    startCommand: pnpm --filter @streamforge/db migrate && node scripts/start-free-demo.mjs
     healthCheckPath: /health/live
     envVars:
       - key: DATABASE_URL
@@ -25,3 +25,25 @@ services:
         value: https://streamforge-api-devps326.onrender.com
       - key: WEB_ORIGIN
         value: https://stream-forge-flame.vercel.app,https://stream-forge-dev-pratap-singhs-projects-72d953f1.vercel.app,https://stream-forge-d7jg17zx0-dev-pratap-singhs-projects-72d953f1.vercel.app
+      - key: DEMO_FREE_MODE
+        value: "1"
+      - key: MAX_UPLOAD_BYTES
+        value: "20971520"
+      - key: USER_QUOTA_BYTES
+        value: "209715200"
+      - key: MAX_ACTIVE_UPLOADS
+        value: "1"
+      - key: MEDIA_TOKEN_TTL_SECONDS
+        value: "120"
+      - key: WORKER_CONCURRENCY
+        value: "1"
+      - key: WORKER_FFMPEG_THREADS
+        value: "1"
+      - key: WORKER_MAX_DURATION_SECONDS
+        value: "45"
+      - key: WORKER_TIMEOUT_SECONDS
+        value: "900"
+      - key: WORKER_MAX_ATTEMPTS
+        value: "2"
+      - key: WORKER_TEMP_BUDGET_BYTES
+        value: "536870912"
