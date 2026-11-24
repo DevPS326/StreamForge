@@ -7,6 +7,7 @@ import { describe, expect, it, vi } from "vitest";
 import { hashPassword, newSecret, passwordMatches } from "../src/auth";
 import { parseConfig } from "../src/config";
 import type { Database } from "../src/database";
+import type { DemoGate } from "../src/demo";
 import { ApiErrors, httpPolicy } from "../src/http";
 import {
   MediaController,
@@ -110,6 +111,7 @@ describe("private media access", () => {
     const get = vi.fn();
     const controller = new MediaController(
       { video: { findFirst } } as unknown as Database,
+      {} as DemoGate,
       { get } as unknown as Storage,
       config,
     );
@@ -137,6 +139,7 @@ describe("private media access", () => {
     const findFirst = vi.fn();
     const controller = new MediaController(
       { video: { findFirst } } as unknown as Database,
+      {} as DemoGate,
       {} as Storage,
       config,
     );
