@@ -22,12 +22,14 @@ export const DEMO_MAX_QUEUE = 5;
 export const DEMO_SLOT_MS = 2 * 60_000;
 const DEMO_DAY_UPLOADS = 5;
 const DEMO_MONTH_UPLOADS = 50;
+const DEMO_DAY_TURNS = 8;
+const DEMO_MONTH_TURNS = 100;
 const STALE_QUEUE_MS = 15 * 60_000;
 
 // PostgreSQL advisory locks serialize admission and global quota reservations
 // across multiple API instances; they are released on transaction completion.
 const GATE_LOCK = 824120;
-const STORAGE_LOCK = 824121;
+const STORAGE_LOCK = GATE_LOCK;
 
 @Injectable()
 export class DemoGate {
@@ -67,6 +69,25 @@ export class DemoGate {
         waiting.push(ticket);
       }
       if (!active && waiting.length) {
+        const dayKey = now.toISOString().slice(0, 10);
+        const monthKey = dayKey.slice(0, 7);
+        const usage = await tx.demoUsage.upsert({
+          where: { id: 1 },
+          create: { id: 1, dayKey, monthKey },
+          update: {},
+        });
+        const dayTurns = (usage.dayKey === dayKey ? usage.dayTurns : 0) + 1;
+        const monthTurns = (usage.monthKey === monthKey ? usage.monthTurns : 0) + 1;
+        if (dayTurns > DEMO_DAY_TURNS || monthTurns > DEMO_MONTH_TURNS)
+          throw new HttpException("Free demo session budget reached. Access resets in the next quota window.", 429);
+        await tx.demoUsage.update({
+          where: { id: 1 },
+          data: {
+            dayKey, monthKey, dayTurns, monthTurns,
+            dayUploads: usage.dayKey === dayKey ? usage.dayUploads : 0,
+            monthUploads: usage.monthKey === monthKey ? usage.monthUploads : 0,
+          },
+        });
         const first = waiting[0]!;
         const until = new Date(+now + DEMO_SLOT_MS);
         await tx.demoTurn.update({
@@ -130,6 +151,24 @@ export class DemoGate {
     return turn.expiresAt;
   }
 
+  async reserveMediaRequest(userId: string) {
+    if (!DEMO_MODE) return;
+    const result = await this.db.demoTurn.updateMany({
+      where: { userId, expiresAt: { gt: new Date() }, mediaReads: { lt: 100 } },
+      data: { mediaReads: { increment: 1 } },
+    });
+    if (!result.count) throw new HttpException("Demo streaming request cap reached.", 429);
+  }
+
+  async reserveDownload(userId: string) {
+    if (!DEMO_MODE) return;
+    const result = await this.db.demoTurn.updateMany({
+      where: { userId, expiresAt: { gt: new Date() }, downloads: { lt: 1 } },
+      data: { downloads: { increment: 1 } },
+    });
+    if (!result.count) throw new HttpException("One private download per demo slot. Rejoin the queue to download again.", 429);
+  }
+
   async reserveUpload(tx: Prisma.TransactionClient, size: number) {
     if (!DEMO_MODE) return;
     if (size > DEMO_FILE_BYTES)
@@ -164,7 +203,11 @@ export class DemoGate {
       );
     await tx.demoUsage.update({
       where: { id: 1 },
-      data: { dayKey, monthKey, dayUploads, monthUploads },
+      data: {
+        dayKey, monthKey, dayUploads, monthUploads,
+        dayTurns: usage.dayKey === dayKey ? usage.dayTurns : 0,
+        monthTurns: usage.monthKey === monthKey ? usage.monthTurns : 0,
+      },
     });
   }
 }
