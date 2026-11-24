@@ -19,7 +19,7 @@ export class PostgresJobQueue {
   async send(
     command: unknown,
     options?: { abortSignal?: AbortSignal },
-  ): Promise<any> {
+  ): Promise<unknown> {
     if (command instanceof ReceiveMessageCommand) {
       const now = new Date();
       const job = await this.db.processingJob.findFirst({
