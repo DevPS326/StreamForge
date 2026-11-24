@@ -1,0 +1,13 @@
+.git
+**/.env*
+**/node_modules
+**/dist
+**/.next
+**/.turbo
+artifacts
+test-results
+playwright-report
+**/.terraform
+**/*.tfstate*
+**/*.pem
+packages/db/generated

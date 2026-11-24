@@ -1,0 +1,19 @@
+{
+  "name": "@streamforge/db",
+  "version": "0.1.0",
+  "private": true,
+  "main": "./index.cjs",
+  "types": "./index.d.ts",
+  "scripts": {
+    "generate": "prisma generate",
+    "migrate": "prisma migrate deploy",
+    "migrate:dev": "prisma migrate dev",
+    "seed": "node seed.mjs"
+  },
+  "dependencies": {
+    "@prisma/client": "6.19.3"
+  },
+  "devDependencies": {
+    "prisma": "6.19.3"
+  }
+}

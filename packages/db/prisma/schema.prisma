@@ -1,0 +1,175 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../generated/client"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum VideoStatus {
+  UPLOADING
+  PROCESSING
+  READY
+  FAILED
+  DELETING
+  DELETED
+}
+
+enum UploadStatus {
+  INITIATING
+  ACTIVE
+  COMPLETING
+  COMPLETED
+  ABORTING
+  ABORTED
+}
+
+enum JobStatus {
+  PENDING
+  RUNNING
+  SUCCEEDED
+  FAILED
+  CANCELLED
+}
+
+enum OutboxKind {
+  PROCESS_VIDEO
+  CLEANUP_VIDEO
+}
+
+enum AssetKind {
+  MASTER
+  VARIANT
+  THUMBNAIL
+}
+
+model User {
+  id           String    @id @default(uuid())
+  email        String    @unique
+  passwordHash String
+  name         String
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  sessions     Session[]
+  videos       Video[]
+}
+
+model Session {
+  id        String   @id @default(uuid())
+  tokenHash String   @unique
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([userId, expiresAt])
+  @@index([expiresAt])
+}
+
+model Video {
+  id              String         @id @default(uuid())
+  userId          String
+  user            User           @relation(fields: [userId], references: [id], onDelete: Restrict)
+  title           String
+  status          VideoStatus    @default(UPLOADING)
+  originalKey     String         @unique
+  sizeBytes       BigInt
+  mimeType        String
+  durationSeconds Float?
+  width           Int?
+  height          Int?
+  mediaPrefix     String?
+  failureCode     String?
+  deletedAt       DateTime?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+  upload          UploadSession?
+  job             ProcessingJob?
+  assets          VideoAsset[]
+  shares          ShareToken[]
+  outbox          Outbox[]
+
+  @@index([userId, createdAt, id])
+  @@index([userId, status])
+}
+
+model UploadSession {
+  id              String       @id @default(uuid())
+  requestKey      String?      @unique
+  videoId         String       @unique
+  video           Video        @relation(fields: [videoId], references: [id], onDelete: Cascade)
+  filename        String
+  storageUploadId String?
+  status          UploadStatus @default(INITIATING)
+  partSize        Int
+  partCount       Int
+  expiresAt       DateTime
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  @@index([status, expiresAt])
+  @@index([status, updatedAt])
+}
+
+model ProcessingJob {
+  id             String    @id @default(uuid())
+  videoId        String    @unique
+  video          Video     @relation(fields: [videoId], references: [id], onDelete: Cascade)
+  status         JobStatus @default(PENDING)
+  attempts       Int       @default(0)
+  leaseToken     String?
+  leaseExpiresAt DateTime?
+  nextAttemptAt  DateTime  @default(now())
+  lastError      String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@index([status, nextAttemptAt])
+  @@index([status, leaseExpiresAt])
+}
+
+model Outbox {
+  id             String     @id @default(uuid())
+  kind           OutboxKind
+  videoId        String
+  video          Video      @relation(fields: [videoId], references: [id], onDelete: Cascade)
+  payload        Json
+  attempts       Int        @default(0)
+  availableAt    DateTime   @default(now())
+  leaseToken     String?
+  leaseExpiresAt DateTime?
+  sentAt         DateTime?
+  lastError      String?
+  createdAt      DateTime   @default(now())
+
+  @@index([sentAt, availableAt])
+  @@index([videoId])
+}
+
+model VideoAsset {
+  id        String    @id @default(uuid())
+  videoId   String
+  video     Video     @relation(fields: [videoId], references: [id], onDelete: Cascade)
+  key       String    @unique
+  kind      AssetKind
+  width     Int?
+  height    Int?
+  bitrate   Int?
+  createdAt DateTime  @default(now())
+
+  @@index([videoId, kind])
+}
+
+model ShareToken {
+  id             String    @id @default(uuid())
+  videoId        String
+  video          Video     @relation(fields: [videoId], references: [id], onDelete: Cascade)
+  tokenHash      String    @unique
+  encryptedToken String?
+  createdAt      DateTime  @default(now())
+  revokedAt      DateTime?
+
+  @@index([videoId, revokedAt])
+}

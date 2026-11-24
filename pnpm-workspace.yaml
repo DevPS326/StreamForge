@@ -1,0 +1,23 @@
+packages:
+  - "apps/*"
+  - "packages/*"
+allowBuilds:
+  "@scarf/scarf": false
+  "@nestjs/core": true
+  "@prisma/client": true
+  "@prisma/engines": true
+  esbuild: true
+  prisma: true
+  sharp: true
+  unrs-resolver: true
+overrides:
+  "@prisma/config>deepmerge-ts": 8.0.0
+  "@prisma/config>effect": 3.22.1
+catalog:
+  "@aws-sdk/client-s3": ^3.915.0
+  "@aws-sdk/client-sqs": ^3.915.0
+  "@types/node": ^22.15.0
+  dotenv: ^17.2.3
+  tsx: ^4.20.6
+  typescript: ^5.9.3
+  vitest: ^4.0.3

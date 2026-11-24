@@ -1,0 +1,73 @@
+name: StreamForge checks
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm audit --audit-level high
+      - run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - run: pnpm lint && pnpm format:check && pnpm typecheck && pnpm test && pnpm build
+        env:
+          NEXT_TELEMETRY_DISABLED: "1"
+      - run: docker compose config --quiet
+      - run: cp .env.example .env && docker compose --profile app up -d --build
+      - run: pnpm exec playwright install --with-deps chromium
+      - name: Start the web build and wait for the stack
+        run: |
+          pnpm --filter @streamforge/web start > web.log 2>&1 &
+          for i in $(seq 1 90); do
+            if curl -fsS http://localhost:4000/health/ready &&
+               curl -fsS http://localhost:3000/login >/dev/null &&
+               docker compose --profile app exec -T worker node -e "fetch('http://127.0.0.1:3011/ready').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"; then
+              exit 0
+            fi
+            sleep 2
+          done
+          cat web.log
+          docker compose --profile app logs --no-color
+          exit 1
+      - run: pnpm test:integration && pnpm test:e2e
+      - run: node --env-file=.env scripts/run.mjs pnpm --filter @streamforge/worker test
+        env:
+          WORKER_TEST_DATABASE_URL: postgresql://streamforge:streamforge@localhost:5432/streamforge?schema=public
+          WORKER_TEST_ELASTICMQ_ENDPOINT: http://localhost:9324
+          WORKER_TEST_CRASH: "1"
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: browser-and-service-results
+          path: |
+            playwright-report
+            test-results
+            web.log
+      - run: docker compose --profile app down -v
+        if: always()
+
+  infrastructure:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.14.3
+      - run: terraform -chdir=infrastructure/aws fmt -check && terraform -chdir=infrastructure/aws init -backend=false && terraform -chdir=infrastructure/aws validate
