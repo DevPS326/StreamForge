@@ -8,6 +8,7 @@ import helmet from "helmet";
 import { AuthController, SessionGuard } from "./auth";
 import { API_CONFIG, API_PREFIX, parseConfig } from "./config";
 import { Database } from "./database";
+import { DemoController, DemoGate } from "./demo";
 import { HealthController } from "./health";
 import { ApiErrors, httpPolicy, parserError } from "./http";
 import { MediaController, VideoPresenter } from "./media";
@@ -19,6 +20,7 @@ import { ShareController, VideoController } from "./videos";
 @Module({
   controllers: [
     HealthController,
+    DemoController,
     AuthController,
     UploadController,
     VideoController,
@@ -27,6 +29,7 @@ import { ShareController, VideoController } from "./videos";
   ],
   providers: [
     Database,
+    DemoGate,
     Storage,
     SessionGuard,
     Uploads,
