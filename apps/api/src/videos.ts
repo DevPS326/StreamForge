@@ -211,8 +211,13 @@ export class VideoController {
 
   @Get(":id/download")
   @ApiParam({ name: "id", format: "uuid" })
-  @ApiOperation({ summary: "Issue private download access bounded by the active demo slot" })
-  async download(@Req() request: AuthenticatedRequest, @Param("id") idParam: string) {
+  @ApiOperation({
+    summary: "Issue private download access bounded by the active demo slot",
+  })
+  async download(
+    @Req() request: AuthenticatedRequest,
+    @Param("id") idParam: string,
+  ) {
     const id = validate(uuid, idParam);
     const video = await this.db.video.findFirst({
       where: { id, userId: request.auth.user.id, status: "READY" },
@@ -230,7 +235,9 @@ export class VideoController {
 
   @Get(":id/download-file")
   @ApiParam({ name: "id", format: "uuid" })
-  @ApiOperation({ summary: "Metered private download, limited to one request per demo slot" })
+  @ApiOperation({
+    summary: "Metered private download, limited to one request per demo slot",
+  })
   async downloadFile(
     @Req() request: AuthenticatedRequest,
     @Res() response: Response,
@@ -239,7 +246,12 @@ export class VideoController {
     const id = validate(uuid, idParam);
     const video = await this.db.video.findFirst({
       where: { id, userId: request.auth.user.id, status: "READY" },
-      select: { originalKey: true, title: true, mimeType: true, sizeBytes: true },
+      select: {
+        originalKey: true,
+        title: true,
+        mimeType: true,
+        sizeBytes: true,
+      },
     });
     if (!video) throw new NotFoundException("Processed video is not ready");
     await this.gate.assertActive(request.auth.user.id);
@@ -247,9 +259,13 @@ export class VideoController {
     const object = await this.storage.get(video.originalKey);
     if (!(object.Body instanceof Readable))
       throw new ConflictException("Video download is not available");
-    const filename = video.title.replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 100) || "video";
+    const filename =
+      video.title.replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 100) || "video";
     response.setHeader("Content-Type", video.mimeType);
-    response.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    response.setHeader(
+      "Content-Disposition",
+      `attachment; filename="${filename}"`,
+    );
     response.setHeader("Cache-Control", "private, no-store");
     response.setHeader("Content-Length", video.sizeBytes.toString());
     try {
