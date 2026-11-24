@@ -29,6 +29,7 @@ import { z } from "zod";
 import { SessionGuard, type AuthenticatedRequest } from "./auth";
 import { API_CONFIG, type ApiConfig } from "./config";
 import { Database } from "./database";
+import { DemoGate } from "./demo";
 import { VideoPresenter } from "./media";
 import { Storage, storageStatus, type StoredPart } from "./storage";
 import { documentedBody, title, uuid, validate } from "./validation";
@@ -150,6 +151,7 @@ export class Uploads {
 
   constructor(
     @Inject(Database) private readonly db: Database,
+    @Inject(DemoGate) private readonly demo: DemoGate,
     @Inject(Storage) private readonly storage: Storage,
     @Inject(API_CONFIG) private readonly config: ApiConfig,
   ) {}
@@ -223,6 +225,7 @@ export class Uploads {
       if (active >= this.config.MAX_ACTIVE_UPLOADS)
         throw new ConflictException("Too many uploads in progress");
 
+      await this.demo.reserveUpload(tx, input.size);
       const videoId = randomUUID();
       const upload = await tx.uploadSession.create({
         include: uploadInclude,
