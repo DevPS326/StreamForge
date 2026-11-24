@@ -18,8 +18,8 @@ const supportedVideoCodecs = new Set([
   "prores",
   "theora",
 ]);
-const maxSourceDimension = 8192;
-const maxSourcePixels = 38_000_000;
+const maxSourceDimension = process.env.DEMO_FREE_MODE === "1" ? 1280 : 8192;
+const maxSourcePixels = process.env.DEMO_FREE_MODE === "1" ? 1280 * 720 : 38_000_000;
 
 export class MediaError extends Error {
   constructor(
@@ -217,11 +217,13 @@ function evenDimension(value: number): number {
 
 export function selectRenditions(width: number, height: number): Rendition[] {
   const landscape = width >= height;
-  const candidates = [
-    { short: 1080, long: 1920, bitrate: 5_000_000 },
-    { short: 720, long: 1280, bitrate: 2_800_000 },
-    { short: 480, long: 854, bitrate: 1_200_000 },
-  ];
+  const candidates = process.env.DEMO_FREE_MODE === "1"
+    ? [{ short: 480, long: 854, bitrate: 700_000 }]
+    : [
+        { short: 1080, long: 1920, bitrate: 5_000_000 },
+        { short: 720, long: 1280, bitrate: 2_800_000 },
+        { short: 480, long: 854, bitrate: 1_200_000 },
+      ];
   const renditions: Rendition[] = [];
 
   for (const candidate of candidates) {
