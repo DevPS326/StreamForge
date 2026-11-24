@@ -224,7 +224,10 @@ export class MediaController {
       select: { id: true, userId: true },
     });
     if (!video) throw new NotFoundException("Media is not available");
-    if (DEMO_MODE) await this.gate.assertActive(video.userId);
+    if (DEMO_MODE) {
+      await this.gate.assertActive(video.userId);
+      await this.gate.reserveMediaRequest(video.userId);
+    }
 
     response.setHeader("Cache-Control", "private, no-store");
     const key = `${grant.prefix}/${path}`;
