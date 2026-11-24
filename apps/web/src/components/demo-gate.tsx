@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, type ReactNode } from "react";
-import { api, message } from "@/lib/api";
+import { api, ApiError, message } from "@/lib/api";
 import { Brand } from "./brand";
 import { LoadingState } from "./feedback";
 
@@ -15,12 +15,18 @@ export function DemoGate({ children }: { children: ReactNode }) {
   const [turn, setTurn] = useState<Turn | null>(null);
   const [error, setError] = useState("");
   const [now, setNow] = useState(0);
+  const [quotaResetAt, setQuotaResetAt] = useState<number | null>(null);
 
   useEffect(() => {
     let closed = false;
     let pending = false;
+    let quotaBlockedUntil = 0;
     const refresh = async () => {
-      if (pending || closed) return;
+      if (pending || closed || Date.now() < quotaBlockedUntil) return;
+      if (quotaBlockedUntil) {
+        quotaBlockedUntil = 0;
+        setQuotaResetAt(null);
+      }
       pending = true;
       try {
         let next = await api<Turn>("/demo/status");
@@ -29,9 +35,23 @@ export function DemoGate({ children }: { children: ReactNode }) {
         if (!closed) {
           setTurn(next);
           setError("");
+          setQuotaResetAt(null);
         }
       } catch (err) {
         if (!closed) {
+          if (
+            err instanceof ApiError &&
+            err.status === 429 &&
+            /free demo session budget reached/i.test(err.message)
+          ) {
+            const today = new Date();
+            quotaBlockedUntil = Date.UTC(
+              today.getUTCFullYear(),
+              today.getUTCMonth(),
+              today.getUTCDate() + 1,
+            );
+            setQuotaResetAt(quotaBlockedUntil);
+          }
           setError(message(err));
           setTurn((previous) =>
             previous?.state === "active" ? previous : null,
@@ -59,6 +79,8 @@ export function DemoGate({ children }: { children: ReactNode }) {
           Math.ceil((new Date(turn.expiresAt).getTime() - now) / 1000),
         );
 
+  const budgetReached = quotaResetAt !== null && quotaResetAt > now;
+
   if (turn?.state === "active" && (!turn.expiresAt || seconds > 0)) {
     return (
       <>
@@ -80,19 +102,28 @@ export function DemoGate({ children }: { children: ReactNode }) {
       <Brand />
       <section className="grid gap-4 rounded-2xl border border-line bg-surface p-7">
         <h1 className="text-2xl font-bold">
-          {turn?.state === "queued"
-            ? "You’re in the demo queue"
-            : "Joining free demo…"}
+          {budgetReached
+            ? "Free demo quota reached"
+            : turn?.state === "queued"
+              ? "You’re in the demo queue"
+              : "Joining free demo…"}
         </h1>
         <p className="text-muted">
           StreamForge allows one active user for two minutes. All other users
           wait in FIFO order. The slot automatically moves to the next person.
         </p>
-        {turn?.state === "queued" ? (
+        {budgetReached ? (
+          <p className="text-sm text-muted" role="status">
+            To prevent unexpected charges, new sessions are paused until the
+            next quota window. Daily limits reset at 05:30 AM IST. The site
+            will automatically retry then. If the monthly quota is exhausted,
+            access resumes in the next month.
+          </p>
+        ) : turn?.state === "queued" ? (
           <p className="text-xl font-semibold">Position #{turn.position}</p>
         ) : (
           <LoadingState label="Checking next available slot…" />
-        )}
+        )
         {error && (
           <p role="alert" className="text-sm text-danger">
             {error}
