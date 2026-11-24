@@ -203,7 +203,7 @@ export function UploadPageContent() {
         <h1 className="text-4xl font-bold tracking-[-0.055em]">
           Upload videos
         </h1>
-        <p className="mt-2 text-muted">Add videos to your private library.</p>
+        <p className="mt-2 text-muted">Free demo: 20 MiB per file · one active visitor · 5 uploads daily worldwide.</p>
       </header>
       <section
         aria-label="Upload video files"
