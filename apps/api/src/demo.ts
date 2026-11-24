@@ -91,7 +91,10 @@ export class DemoGate {
 
   async leave(userId: string) {
     if (!DEMO_MODE) return;
-    await this.db.demoTurn.deleteMany({ where: { userId } });
+    // Keep active slots reserved until expiry: presigned downloads cannot be revoked early.
+    await this.db.demoTurn.deleteMany({
+      where: { userId, OR: [{ expiresAt: null }, { expiresAt: { lte: new Date() } }] },
+    });
   }
 
   async assertActive(userId: string): Promise<Date | undefined> {
