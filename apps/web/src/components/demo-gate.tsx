@@ -123,7 +123,7 @@ export function DemoGate({ children }: { children: ReactNode }) {
           <p className="text-xl font-semibold">Position #{turn.position}</p>
         ) : (
           <LoadingState label="Checking next available slot…" />
-        )
+        )}
         {error && (
           <p role="alert" className="text-sm text-danger">
             {error}
