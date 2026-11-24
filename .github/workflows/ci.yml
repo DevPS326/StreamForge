@@ -64,7 +64,7 @@ jobs:
           for i in $(seq 1 45); do
             if curl -fsS http://127.0.0.1:3012/ready && curl -fsS http://localhost:4001/health/ready; then
               SMOKE_ORIGIN=http://localhost:4001 node tests/integration/demo-quotas.mjs
-              SMOKE_ORIGIN=http://localhost:4001 SMOKE_API_ORIGIN=http://localhost:4001 SMOKE_VERIFY_FIFO=1 node scripts/live-smoke.mjs
+              SMOKE_ORIGIN=http://localhost:4001 SMOKE_API_ORIGIN=http://localhost:4001 SMOKE_VERIFY_FIFO=1 SMOKE_VERIFY_BUDGETS=1 node scripts/live-smoke.mjs
               exit $?
             fi
             sleep 2

@@ -13,11 +13,13 @@ The download returns the original and permits a single authenticated transfer pe
 - Eight turns per UTC day and 100 per UTC month. Five upload reservations per day and 50 per month. An exhausted monthly budget resets on the first UTC day of the next month. A 429 response carries the reason and the applicable reset timestamp.
 - One active user, one FFmpeg worker, 20 MiB per file, 45 seconds, one output no higher than 480p, and two attempts. Each job is bounded by the active work deadline.
 - Global storage reservation is capped at 200 MiB. The reservation covers four times the original size plus 1 MiB. The worker checks artifact sizes before publishing.
-- Up to 100 HLS requests and 128 MiB of authorized response bytes per turn, including the original download. This implies up to 1 GiB per UTC day and 12.5 GiB per UTC month through metered demo responses. These are application limits. Existing reverse-proxy and per-IP limits also apply.
+- Up to 100 HLS requests and 128 MiB of authorized response bytes per turn, including the original download. A separate atomic ledger caps metered response bytes at 1 GiB per UTC day and 12.5 GiB per UTC month, including transfers in windows that cross midnight. These are application limits. Existing reverse-proxy and per-IP limits also apply.
 
 R2 can bill for storage and operations. Presigned multipart URLs can be retried until expiry, and provider accounting includes operations outside the metered application path. Render free services can sleep and have provider-side usage limits. Set usage alerts in Cloudflare and review Render bandwidth and Postgres expiry in the provider consoles. Keep uploads disabled if the provider budget cannot be monitored.
 
-The current Render free PostgreSQL instance was reported to expire around December 24, 2026. Run an encrypted backup from an authorized private environment and test restoration before expiry. Keep the external database allowlist closed. No replacement database or provider plan is provisioned by this repository.
+The current Render free PostgreSQL instance was reported to expire around December 24, 2026. Run an encrypted backup from an authorized private environment and test restoration before expiry. Keep the external database allowlist closed. No replacement database or provider plan is provisioned by this repository. [Render backup documentation](https://render.com/docs/postgresql-backups)
+
+For migration, create a custom-format dump with `pg_dump --format=custom --no-owner` from a private client with database access. Encrypt the dump with an approved recipient key before copying or retaining it. Restore into a disposable database with `pg_restore --exit-on-error --no-owner` and verify the migrations, account counts, job state, and media references before switching the Render secret. Neon Free is a candidate with 1 GB storage and 100 CU-hours per project per month. The PostgreSQL polling worker can keep compute awake, so measure its usage before choosing that plan. [Neon Free limits](https://neon.com/blog/neon-free-plan-1-gb-per-project)
 
 ## Verification
 

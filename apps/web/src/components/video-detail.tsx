@@ -159,16 +159,43 @@ export function VideoDetail({
     if (busy || !video || share || video.status !== "READY") return;
     setBusy(true);
     try {
-      const result = await api<{ url: string }>(
+      const result = await api<{ url: string; expiresInSeconds: number }>(
         "/videos/" + video.id + "/download",
       );
       const link = document.createElement("a");
       link.href = mediaUrl(result.url) ?? result.url;
+      if (!video.sharingEnabled) {
+        const transfer = await fetch(link.href, {
+          credentials: "include",
+          signal: AbortSignal.timeout(
+            Math.max(1, result.expiresInSeconds * 1000),
+          ),
+        });
+        if (!transfer.ok) {
+          const failure = await transfer.json().catch(() => null);
+          throw new Error(
+            typeof failure?.message === "string"
+              ? failure.message
+              : "The demo download could not be completed.",
+          );
+        }
+        const objectUrl = URL.createObjectURL(await transfer.blob());
+        link.href = objectUrl;
+        link.download =
+          transfer.headers
+            .get("content-disposition")
+            ?.match(/filename="([^"]+)"/)?.[1] || video.title;
+        window.setTimeout(() => URL.revokeObjectURL(objectUrl), 30_000);
+      }
       link.rel = "noopener noreferrer";
       document.body.appendChild(link);
       link.click();
       link.remove();
-      toast("Private download link valid for up to two minutes.");
+      toast(
+        video.sharingEnabled
+          ? "Private download started."
+          : "Private download saved.",
+      );
     } catch (error) {
       toast(message(error), "error");
     } finally {

@@ -50,6 +50,56 @@ async function call(path, options = {}) {
   return data;
 }
 
+async function verifyTransferBudgets(url) {
+  if (process.env.SMOKE_VERIFY_BUDGETS !== "1") return;
+  const database = new URL(process.env.DATABASE_URL);
+  const local = (target) =>
+    ["127.0.0.1", "localhost"].includes(new URL(target).hostname);
+  if (
+    !local(url) ||
+    !local(database.href) ||
+    database.pathname !== "/streamforge_demo_verify"
+  )
+    throw new Error(
+      "Transfer budget fixtures require the isolated loopback demo database",
+    );
+  const { PrismaClient } = await import("@streamforge/db");
+  const db = new PrismaClient();
+  const before = await db.demoTransferUsage.findUnique({ where: { id: 1 } });
+  const dayKey = new Date().toISOString().slice(0, 10);
+  const monthKey = dayKey.slice(0, 7);
+  try {
+    for (const [reason, limit] of [
+      ["DAILY_EGRESS", 1024n ** 3n],
+      ["MONTHLY_EGRESS", 128n * 1024n ** 2n * 100n],
+    ]) {
+      const counters = {
+        dayKey,
+        monthKey,
+        dayBytes: reason === "DAILY_EGRESS" ? limit : 0n,
+        monthBytes: reason === "MONTHLY_EGRESS" ? limit : 0n,
+      };
+      await db.demoTransferUsage.upsert({
+        where: { id: 1 },
+        create: { id: 1, ...counters },
+        update: counters,
+      });
+      const denied = await fetch(url, { signal: AbortSignal.timeout(15_000) });
+      if (denied.status !== 429 || (await denied.json()).reason !== reason)
+        throw new Error("Expected " + reason + " transfer denial");
+    }
+    console.log("Daily and monthly egress denials verified");
+  } finally {
+    if (before) {
+      const { id, ...values } = before;
+      await db.demoTransferUsage.update({ where: { id }, data: values });
+    } else {
+      await db.demoTransferUsage.deleteMany({ where: { id: 1 } });
+    }
+    await db.$disconnect();
+  }
+}
+
 async function main() {
   const warm = await fetch(apiOrigin + "/health/live", {
     signal: AbortSignal.timeout(100_000),
@@ -165,6 +215,7 @@ async function main() {
     throw new Error("READY did not open a new two-minute download window");
   if (!video.playbackUrl)
     throw new Error("READY video missing HLS playback URL");
+  await verifyTransferBudgets(video.playbackUrl);
   const manifest = await fetch(video.playbackUrl, {
     signal: AbortSignal.timeout(30_000),
   });

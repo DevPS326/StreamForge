@@ -200,3 +200,12 @@ model DemoUsage {
   dayTurns     Int    @default(0)
   monthTurns   Int    @default(0)
 }
+
+
+model DemoTransferUsage {
+  id         Int    @id
+  dayKey     String
+  monthKey   String
+  dayBytes   BigInt @default(0)
+  monthBytes BigInt @default(0)
+}

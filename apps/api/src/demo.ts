@@ -235,21 +235,52 @@ export class DemoGate {
     const limit = 128 * 1024 * 1024;
     if (!Number.isSafeInteger(bytes) || bytes <= 0 || bytes > limit)
       throw new HttpException("Invalid demo transfer size", 429);
-    const result = await this.db.demoTurn.updateMany({
-      where: {
-        userId,
-        videoId,
-        readyAt: { not: null },
-        expiresAt: { gt: new Date() },
-        egressBytes: { lte: limit - bytes },
-      },
-      data: { egressBytes: { increment: bytes } },
+    await this.db.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT 1::integer AS acquired FROM pg_advisory_xact_lock(${GATE_LOCK}::bigint)`;
+      const now = new Date();
+      const reserved = await tx.demoTurn.updateMany({
+        where: {
+          userId,
+          videoId,
+          readyAt: { not: null },
+          expiresAt: { gt: now },
+          egressBytes: { lte: limit - bytes },
+        },
+        data: { egressBytes: { increment: bytes } },
+      });
+      if (!reserved.count)
+        throw new HttpException(
+          "The demo transfer budget is exhausted or expired.",
+          429,
+        );
+      const dayKey = now.toISOString().slice(0, 10);
+      const monthKey = dayKey.slice(0, 7);
+      const usage = await tx.demoTransferUsage.upsert({
+        where: { id: 1 },
+        create: { id: 1, dayKey, monthKey },
+        update: {},
+      });
+      const dayBytes =
+        (usage.dayKey === dayKey ? usage.dayBytes : 0n) + BigInt(bytes);
+      const monthBytes =
+        (usage.monthKey === monthKey ? usage.monthBytes : 0n) + BigInt(bytes);
+      if (monthBytes > BigInt(limit) * BigInt(DEMO_MONTH_TURNS))
+        throw quota(
+          "MONTHLY_EGRESS",
+          "The monthly demo transfer budget is exhausted.",
+          resetAt(now, true),
+        );
+      if (dayBytes > BigInt(limit) * BigInt(DEMO_DAY_TURNS))
+        throw quota(
+          "DAILY_EGRESS",
+          "The daily demo transfer budget is exhausted.",
+          resetAt(now, false),
+        );
+      await tx.demoTransferUsage.update({
+        where: { id: 1 },
+        data: { dayKey, monthKey, dayBytes, monthBytes },
+      });
     });
-    if (!result.count)
-      throw new HttpException(
-        "The demo transfer budget is exhausted or expired.",
-        429,
-      );
   }
 
   async reserveDownload(userId: string, videoId: string) {
