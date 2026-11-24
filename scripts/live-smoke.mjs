@@ -46,8 +46,14 @@ async function main() {
     method: "POST", body: { email, password, displayName: "Automated Smoke Test" },
   });
   if (!cookie) throw new Error("Missing session cookie");
-  const turn = await call("/demo/join", { method: "POST" });
-  if (turn.state !== "active") throw new Error("Smoke test couldn't obtain free slot: " + JSON.stringify(turn));
+  let turn = await call("/demo/join", { method: "POST" });
+  for (let i = 0; turn.state === "queued" && i < 110; i++) {
+    if (i % 10 === 0) console.log("Waiting in demo queue, position " + turn.position);
+    await sleep(3_000);
+    turn = await call("/demo/status");
+  }
+  if (turn.state !== "active")
+    throw new Error("Smoke test couldn't obtain free slot: " + JSON.stringify(turn));
   console.log("Demo slot acquired");
 
   const session = await call("/uploads", {
@@ -106,4 +112,7 @@ main()
     console.error("FAIL:", error instanceof Error ? error.message : String(error));
     process.exitCode = 1;
   })
-  .finally(() => rmSync(file, { force: true }));
+  .finally(async () => {
+    if (cookie) await call("/demo/leave", { method: "DELETE" }).catch(() => undefined);
+    rmSync(file, { force: true });
+  });
