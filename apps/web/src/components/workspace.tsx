@@ -14,6 +14,7 @@ import {
 import { api, ApiError, message, type User } from "@/lib/api";
 import { cn } from "@/lib/ui";
 import { Brand } from "./brand";
+import { DemoGate } from "./demo-gate";
 import { ErrorNotice, LoadingState } from "./feedback";
 import { ThemeToggle, useToast } from "./preferences";
 import { Button } from "./ui/button";
@@ -45,6 +46,7 @@ function WorkspaceChrome({ children }: { children: ReactNode }) {
   async function signOut() {
     setSigningOut(true);
     try {
+      await api("/demo/leave", { method: "DELETE" }).catch(() => undefined);
       await api("/auth/logout", { method: "POST" });
       window.location.replace("/login");
     } catch (error) {
@@ -194,9 +196,11 @@ export function Workspace({ children }: { children: ReactNode }) {
 
   return (
     <Account.Provider value={{ user, setUser }}>
-      <UploadProvider key={user.id} userId={user.id}>
-        <WorkspaceChrome>{children}</WorkspaceChrome>
-      </UploadProvider>
+      <DemoGate>
+        <UploadProvider key={user.id} userId={user.id}>
+          <WorkspaceChrome>{children}</WorkspaceChrome>
+        </UploadProvider>
+      </DemoGate>
     </Account.Provider>
   );
 }
