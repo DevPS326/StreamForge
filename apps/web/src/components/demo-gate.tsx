@@ -14,7 +14,7 @@ type Turn = {
 export function DemoGate({ children }: { children: ReactNode }) {
   const [turn, setTurn] = useState<Turn | null>(null);
   const [error, setError] = useState("");
-  const [now, setNow] = useState(Date.now());
+  const [now, setNow] = useState(0);
 
   useEffect(() => {
     let closed = false;
