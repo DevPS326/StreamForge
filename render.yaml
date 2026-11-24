@@ -1,0 +1,27 @@
+# Free demo backend. Existing Render resources are adopted; no paid services.
+services:
+  - type: web
+    name: streamforge-api-devps326
+    runtime: node
+    plan: free
+    region: singapore
+    repo: https://github.com/DevPS326/StreamForge
+    branch: main
+    buildCommand: npm install -g pnpm@11.29.0 && pnpm install --frozen-lockfile && pnpm db:generate && pnpm --filter @streamforge/api build
+    startCommand: pnpm --filter @streamforge/db migrate && node apps/api/dist/main.js
+    healthCheckPath: /health/live
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: streamforge-db-free
+          property: connectionString
+      - key: NODE_ENV
+        value: production
+      - key: NODE_VERSION
+        value: 22.14.0
+      - key: HOST
+        value: 0.0.0.0
+      - key: API_PUBLIC_URL
+        value: https://streamforge-api-devps326.onrender.com
+      - key: WEB_ORIGIN
+        value: https://stream-forge-d7jg17zx0-dev-pratap-singhs-projects-72d953f1.vercel.app
