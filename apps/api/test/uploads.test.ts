@@ -187,6 +187,7 @@ describe("upload state transitions", () => {
       upload.storageUploadId,
       1,
       3,
+      900,
     );
   });
 
