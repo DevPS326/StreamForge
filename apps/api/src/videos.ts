@@ -32,6 +32,8 @@ import {
 } from "./auth";
 import { Database } from "./database";
 import { VideoPresenter } from "./media";
+import { DemoGate, DEMO_MODE } from "./demo";
+import { Storage } from "./storage";
 import { Uploads } from "./uploads";
 import {
   documentedBody,
@@ -139,6 +141,8 @@ export function afterCursor(
 export class VideoController {
   constructor(
     @Inject(Database) private readonly db: Database,
+    @Inject(DemoGate) private readonly gate: DemoGate,
+    @Inject(Storage) private readonly storage: Storage,
     @Inject(VideoPresenter) private readonly presenter: VideoPresenter,
     @Inject(Uploads) private readonly uploads: Uploads,
   ) {}
@@ -199,6 +203,24 @@ export class VideoController {
     });
     if (!video) throw new NotFoundException("Video not found");
     return this.presenter.video(video, null, video.shares.length > 0);
+  }
+
+  @Get(":id/download")
+  @ApiParam({ name: "id", format: "uuid" })
+  @ApiOperation({ summary: "Issue a two-minute private, single-slot download link" })
+  async download(@Req() request: AuthenticatedRequest, @Param("id") idParam: string) {
+    const id = validate(uuid, idParam);
+    const video = await this.db.video.findFirst({
+      where: { id, userId: request.auth.user.id, status: "READY" },
+      select: { originalKey: true, title: true, mimeType: true },
+    });
+    if (!video) throw new NotFoundException("Processed video is not ready");
+    const ends = await this.gate.assertActive(request.auth.user.id);
+    const seconds = ends ? Math.floor((+ends - Date.now()) / 1000) : 120;
+    if (seconds < 1) throw new ConflictException("Your download slot expired");
+    const extension = video.mimeType === "video/mp4" ? ".mp4" : "";
+    const url = await this.storage.signDownload(video.originalKey, video.title + extension, Math.min(120, seconds));
+    return { url, expiresInSeconds: Math.min(120, seconds) };
   }
 
   @Patch(":id")
@@ -295,6 +317,7 @@ export class VideoController {
   ) {
     const id = validate(uuid, idParam);
     const userId = request.auth.user.id;
+    if (DEMO_MODE) throw new ConflictException("Public sharing is disabled in free demo mode");
     const token = newSecret();
     await this.db.$transaction(async (tx) => {
       await tx.$queryRaw`SELECT id FROM "Video" WHERE id = ${id} AND "userId" = ${userId} FOR UPDATE`;
