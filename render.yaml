@@ -24,4 +24,4 @@ services:
       - key: API_PUBLIC_URL
         value: https://streamforge-api-devps326.onrender.com
       - key: WEB_ORIGIN
-        value: https://stream-forge-d7jg17zx0-dev-pratap-singhs-projects-72d953f1.vercel.app
+        value: https://stream-forge-flame.vercel.app,https://stream-forge-dev-pratap-singhs-projects-72d953f1.vercel.app,https://stream-forge-d7jg17zx0-dev-pratap-singhs-projects-72d953f1.vercel.app
