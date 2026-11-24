@@ -366,6 +366,10 @@ export class Uploads {
     if (distinct.some((partNumber) => partNumber > upload.partCount))
       throw new BadRequestException("Part number exceeds the upload layout");
     const { storageUploadId, partSize, video } = upload;
+    const expiresAt = await this.demo.assertActive(userId);
+    const seconds = expiresAt
+      ? Math.max(1, Math.min(30, Math.floor((+expiresAt - Date.now()) / 1000)))
+      : 900;
     const urls = await Promise.all(
       distinct.map(async (partNumber) => ({
         partNumber,
@@ -374,6 +378,7 @@ export class Uploads {
           storageUploadId,
           partNumber,
           expectedPartBytes(Number(video.sizeBytes), partSize, partNumber),
+          seconds,
         ),
       })),
     );
