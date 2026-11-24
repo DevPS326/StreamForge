@@ -1,8 +1,10 @@
+import { ReceiveMessageCommand } from "@aws-sdk/client-sqs";
 import { randomUUID } from "node:crypto";
 import db, { type PrismaClient } from "@streamforge/db";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { attemptPrefix, type ClaimedJob, JobRepository } from "../src/jobs.js";
 import type { EncodedMedia } from "../src/media.js";
+import { PostgresJobQueue } from "../src/pg-queue.js";
 
 const databaseUrl = process.env.WORKER_TEST_DATABASE_URL;
 const sample: EncodedMedia = {
@@ -81,6 +83,30 @@ describe.skipIf(!databaseUrl)(
         throw new Error(`Cannot claim job: ${claim.kind}`);
       return claim.job;
     }
+
+    it(
+      "skips expired PostgreSQL work before polling the next live job",
+      { timeout: 20_000 },
+      async () => {
+        const expired = await fixture();
+        const live = await fixture();
+        await prisma.video.update({
+          where: { id: expired.videoId },
+          data: { demoExpiresAt: new Date(Date.now() - 10_000) },
+        });
+        await prisma.video.update({
+          where: { id: live.videoId },
+          data: { demoExpiresAt: new Date(Date.now() + 60_000) },
+        });
+        const queue = new PostgresJobQueue(prisma, AbortSignal.timeout(5000));
+        const message = await queue.send(
+          new ReceiveMessageCommand({ QueueUrl: "postgres" }),
+        );
+        expect(message).toMatchObject({
+          Messages: [{ MessageId: live.jobId }],
+        });
+      },
+    );
 
     it(
       "claims concurrent duplicates once and fences a crashed worker after lease expiry",

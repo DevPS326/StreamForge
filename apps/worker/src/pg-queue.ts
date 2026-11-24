@@ -24,7 +24,7 @@ export class PostgresJobQueue {
       const now = new Date();
       const job = await this.db.processingJob.findFirst({
         where: {
-          video: { status: "PROCESSING" },
+          video: { status: "PROCESSING", demoExpiresAt: { gt: now } },
           OR: [
             { status: "PENDING", nextAttemptAt: { lte: now } },
             { status: "RUNNING", leaseExpiresAt: { lte: now } },
