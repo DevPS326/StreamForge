@@ -1,7 +1,10 @@
 import type { NextConfig } from "next";
 
 const apiOrigin = (
-  process.env.API_INTERNAL_ORIGIN || "http://localhost:4000"
+  process.env.API_INTERNAL_ORIGIN ||
+  (process.env.VERCEL
+    ? "https://streamforge-api-devps326.onrender.com"
+    : "http://localhost:4000")
 ).replace(/\/+$/, "");
 
 const config: NextConfig = {
