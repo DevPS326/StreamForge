@@ -163,7 +163,7 @@ export async function probeSource(
   ) {
     throw new MediaError(
       "MEDIA_LIMIT_EXCEEDED",
-      "Source dimensions exceed the processing limit",
+      `Source ${video.width}x${video.height} exceeds ${maxSourceDimension}px or ${maxSourcePixels} pixels`,
     );
   }
   const streamDuration = Number(video.duration);
