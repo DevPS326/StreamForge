@@ -10,10 +10,14 @@ function shutdown(reason = "SIGTERM") {
     if (child.exitCode === null) child.kill(reason);
   }
 }
-for (const signal of ["SIGTERM", "SIGINT"]) process.on(signal, () => shutdown(signal));
+for (const signal of ["SIGTERM", "SIGINT"])
+  process.on(signal, () => shutdown(signal));
 
 function launch(name, entry) {
-  const child = spawn(process.execPath, [entry], { stdio: "inherit", env: process.env });
+  const child = spawn(process.execPath, [entry], {
+    stdio: "inherit",
+    env: process.env,
+  });
   children.set(name, child);
   child.once("error", (error) => {
     console.error(name + " could not start", error);

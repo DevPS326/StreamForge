@@ -207,8 +207,13 @@ export class VideoController {
 
   @Get(":id/download")
   @ApiParam({ name: "id", format: "uuid" })
-  @ApiOperation({ summary: "Issue a two-minute private, single-slot download link" })
-  async download(@Req() request: AuthenticatedRequest, @Param("id") idParam: string) {
+  @ApiOperation({
+    summary: "Issue a two-minute private, single-slot download link",
+  })
+  async download(
+    @Req() request: AuthenticatedRequest,
+    @Param("id") idParam: string,
+  ) {
     const id = validate(uuid, idParam);
     const video = await this.db.video.findFirst({
       where: { id, userId: request.auth.user.id, status: "READY" },
@@ -219,7 +224,11 @@ export class VideoController {
     const seconds = ends ? Math.floor((+ends - Date.now()) / 1000) : 120;
     if (seconds < 1) throw new ConflictException("Your download slot expired");
     const extension = video.mimeType === "video/mp4" ? ".mp4" : "";
-    const url = await this.storage.signDownload(video.originalKey, video.title + extension, Math.min(120, seconds));
+    const url = await this.storage.signDownload(
+      video.originalKey,
+      video.title + extension,
+      Math.min(120, seconds),
+    );
     return { url, expiresInSeconds: Math.min(120, seconds) };
   }
 
@@ -317,7 +326,10 @@ export class VideoController {
   ) {
     const id = validate(uuid, idParam);
     const userId = request.auth.user.id;
-    if (DEMO_MODE) throw new ConflictException("Public sharing is disabled in free demo mode");
+    if (DEMO_MODE)
+      throw new ConflictException(
+        "Public sharing is disabled in free demo mode",
+      );
     const token = newSecret();
     await this.db.$transaction(async (tx) => {
       await tx.$queryRaw`SELECT id FROM "Video" WHERE id = ${id} AND "userId" = ${userId} FOR UPDATE`;

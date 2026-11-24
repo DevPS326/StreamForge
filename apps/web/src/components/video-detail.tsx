@@ -160,7 +160,9 @@ export function VideoDetail({
     if (busy || !video || share || video.status !== "READY") return;
     setBusy(true);
     try {
-      const result = await api<{ url: string }>("/videos/" + video.id + "/download");
+      const result = await api<{ url: string }>(
+        "/videos/" + video.id + "/download",
+      );
       const link = document.createElement("a");
       link.href = result.url;
       link.rel = "noopener noreferrer";

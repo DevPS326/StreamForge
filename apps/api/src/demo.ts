@@ -41,7 +41,10 @@ export class DemoGate {
         where: {
           OR: [
             { expiresAt: { lte: now } },
-            { expiresAt: null, joinedAt: { lt: new Date(+now - STALE_QUEUE_MS) } },
+            {
+              expiresAt: null,
+              joinedAt: { lt: new Date(+now - STALE_QUEUE_MS) },
+            },
           ],
         },
       });
@@ -55,7 +58,10 @@ export class DemoGate {
       });
       if (!ticket && join) {
         if (waiting.length >= DEMO_MAX_QUEUE && active) {
-          throw new HttpException("The free demo waiting queue is full. Try again later.", 429);
+          throw new HttpException(
+            "The free demo waiting queue is full. Try again later.",
+            429,
+          );
         }
         ticket = await tx.demoTurn.create({ data: { userId } });
         waiting.push(ticket);
@@ -67,20 +73,33 @@ export class DemoGate {
           where: { userId: first.userId },
           data: { expiresAt: until },
         });
-        if (first.userId === userId)
-          ticket = { ...first, expiresAt: until };
+        if (first.userId === userId) ticket = { ...first, expiresAt: until };
         waiting = waiting.filter((item) => item.userId !== first.userId);
       }
-      if (!ticket) return { state: "none" as const, position: 0, expiresAt: null };
+      if (!ticket)
+        return { state: "none" as const, position: 0, expiresAt: null };
       if (ticket.expiresAt && ticket.expiresAt > now)
-        return { state: "active" as const, position: 0, expiresAt: ticket.expiresAt.toISOString() };
+        return {
+          state: "active" as const,
+          position: 0,
+          expiresAt: ticket.expiresAt.toISOString(),
+        };
       const position = waiting.findIndex((item) => item.userId === userId) + 1;
-      return { state: "queued" as const, position: Math.max(1, position), expiresAt: null };
+      return {
+        state: "queued" as const,
+        position: Math.max(1, position),
+        expiresAt: null,
+      };
     });
   }
 
   status(userId: string) {
-    if (!DEMO_MODE) return Promise.resolve({ state: "active" as const, position: 0, expiresAt: null });
+    if (!DEMO_MODE)
+      return Promise.resolve({
+        state: "active" as const,
+        position: 0,
+        expiresAt: null,
+      });
     return this.coordinate(userId, false);
   }
 
@@ -93,7 +112,10 @@ export class DemoGate {
     if (!DEMO_MODE) return;
     // Keep active slots reserved until expiry: presigned downloads cannot be revoked early.
     await this.db.demoTurn.deleteMany({
-      where: { userId, OR: [{ expiresAt: null }, { expiresAt: { lte: new Date() } }] },
+      where: {
+        userId,
+        OR: [{ expiresAt: null }, { expiresAt: { lte: new Date() } }],
+      },
     });
   }
 
@@ -101,7 +123,10 @@ export class DemoGate {
     if (!DEMO_MODE) return;
     const turn = await this.db.demoTurn.findUnique({ where: { userId } });
     if (!turn?.expiresAt || turn.expiresAt <= new Date())
-      throw new HttpException("Your free demo slot has expired. Join the waiting queue.", 429);
+      throw new HttpException(
+        "Your free demo slot has expired. Join the waiting queue.",
+        429,
+      );
     return turn.expiresAt;
   }
 
@@ -118,7 +143,9 @@ export class DemoGate {
     });
     const reserved = ((total._sum.sizeBytes ?? 0n) + BigInt(size)) * 4n;
     if (reserved > BigInt(DEMO_STORAGE_BYTES))
-      throw new ConflictException("Global free-demo storage budget reached (200 MiB).");
+      throw new ConflictException(
+        "Global free-demo storage budget reached (200 MiB).",
+      );
     const now = new Date();
     const dayKey = now.toISOString().slice(0, 10);
     const monthKey = dayKey.slice(0, 7);
@@ -128,9 +155,13 @@ export class DemoGate {
       update: {},
     });
     const dayUploads = (usage.dayKey === dayKey ? usage.dayUploads : 0) + 1;
-    const monthUploads = (usage.monthKey === monthKey ? usage.monthUploads : 0) + 1;
+    const monthUploads =
+      (usage.monthKey === monthKey ? usage.monthUploads : 0) + 1;
     if (dayUploads > DEMO_DAY_UPLOADS || monthUploads > DEMO_MONTH_UPLOADS)
-      throw new HttpException("Free demo upload quota reached. Try in a later quota window.", 429);
+      throw new HttpException(
+        "Free demo upload quota reached. Try in a later quota window.",
+        429,
+      );
     await tx.demoUsage.update({
       where: { id: 1 },
       data: { dayKey, monthKey, dayUploads, monthUploads },

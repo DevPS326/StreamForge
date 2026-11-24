@@ -74,7 +74,9 @@ export class Storage implements OnApplicationShutdown {
   async ready() {
     const abortSignal = AbortSignal.timeout(4000);
     if (process.env.DEMO_FREE_MODE === "1") {
-      await this.s3.send(new HeadBucketCommand({ Bucket: this.bucket }), { abortSignal });
+      await this.s3.send(new HeadBucketCommand({ Bucket: this.bucket }), {
+        abortSignal,
+      });
       return;
     }
     await Promise.all([
@@ -105,7 +107,13 @@ export class Storage implements OnApplicationShutdown {
     return result.UploadId;
   }
 
-  signPart(key: string, uploadId: string, partNumber: number, size: number, ttlSeconds = 900) {
+  signPart(
+    key: string,
+    uploadId: string,
+    partNumber: number,
+    size: number,
+    ttlSeconds = 900,
+  ) {
     return getSignedUrl(
       this.presigner,
       new UploadPartCommand({
@@ -120,11 +128,17 @@ export class Storage implements OnApplicationShutdown {
   }
 
   signDownload(key: string, filename: string, ttlSeconds: number) {
-    const safe = filename.replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 100) || "video.mp4";
-    return getSignedUrl(this.presigner,
-      new GetObjectCommand({ Bucket: this.bucket, Key: key,
-        ResponseContentDisposition: `attachment; filename="${safe}"` }),
-      { expiresIn: ttlSeconds });
+    const safe =
+      filename.replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 100) || "video.mp4";
+    return getSignedUrl(
+      this.presigner,
+      new GetObjectCommand({
+        Bucket: this.bucket,
+        Key: key,
+        ResponseContentDisposition: `attachment; filename="${safe}"`,
+      }),
+      { expiresIn: ttlSeconds },
+    );
   }
 
   async parts(key: string, uploadId: string) {

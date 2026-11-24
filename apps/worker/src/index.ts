@@ -47,9 +47,13 @@ async function main() {
     requestChecksumCalculation: "WHEN_REQUIRED",
     responseChecksumValidation: "WHEN_REQUIRED",
   });
-  const queue: SQSClient = process.env.DEMO_FREE_MODE === "1"
-    ? (new PostgresJobQueue(prisma, stop.signal) as unknown as SQSClient)
-    : new SQSClient({ region: settings.region, endpoint: settings.sqsEndpoint });
+  const queue: SQSClient =
+    process.env.DEMO_FREE_MODE === "1"
+      ? (new PostgresJobQueue(prisma, stop.signal) as unknown as SQSClient)
+      : new SQSClient({
+          region: settings.region,
+          endpoint: settings.sqsEndpoint,
+        });
   const jobs = new JobRepository(
     prisma,
     settings.leaseSeconds,

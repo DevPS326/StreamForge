@@ -146,9 +146,14 @@ export class SessionGuard implements CanActivate {
       process.env.DEMO_FREE_MODE === "1" &&
       /^\/api\/v1\/(uploads|videos)(?:\/|$)/.test(request.path)
     ) {
-      const turn = await this.db.demoTurn.findUnique({ where: { userId: session.user.id } });
+      const turn = await this.db.demoTurn.findUnique({
+        where: { userId: session.user.id },
+      });
       if (!turn?.expiresAt || turn.expiresAt <= new Date())
-        throw new HttpException("Your free demo slot has expired. Join the waiting queue.", 429);
+        throw new HttpException(
+          "Your free demo slot has expired. Join the waiting queue.",
+          429,
+        );
     }
     return true;
   }

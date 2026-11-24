@@ -128,7 +128,9 @@ export class VideoPresenter {
           id: video.id,
           shareId,
           prefix: video.mediaPrefix,
-          expiresAt: Date.now() + Math.min(120, this.config.MEDIA_TOKEN_TTL_SECONDS) * 1000,
+          expiresAt:
+            Date.now() +
+            Math.min(120, this.config.MEDIA_TOKEN_TTL_SECONDS) * 1000,
         },
         this.config.MEDIA_TOKEN_SECRET,
       );
@@ -204,7 +206,9 @@ export class MediaController {
         ? verifyGrant(grantParam, this.config.MEDIA_TOKEN_SECRET)
         : undefined;
     if (DEMO_MODE && grant?.shareId)
-      throw new NotFoundException("Public sharing is disabled in free demo mode");
+      throw new NotFoundException(
+        "Public sharing is disabled in free demo mode",
+      );
     if (!grant || grant.id !== id || !validAssetPath(path))
       throw new NotFoundException("Media is not available");
 

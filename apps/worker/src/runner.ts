@@ -247,7 +247,10 @@ export class ProcessingWorker {
         );
       const sourceBytes = Number(job.sizeBytes);
       if (process.env.DEMO_FREE_MODE === "1" && sourceBytes > 20 * 1024 * 1024)
-        throw new MediaError("MEDIA_LIMIT_EXCEEDED", "Free demo maximum is 20 MiB per video");
+        throw new MediaError(
+          "MEDIA_LIMIT_EXCEEDED",
+          "Free demo maximum is 20 MiB per video",
+        );
       releaseSource = this.budget.reserve(sourceBytes);
       await requireDiskSpace(this.config.tempDir, sourceBytes);
       workingDirectory = await mkdtemp(

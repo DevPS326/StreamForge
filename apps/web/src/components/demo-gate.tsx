@@ -33,7 +33,9 @@ export function DemoGate({ children }: { children: ReactNode }) {
       } catch (err) {
         if (!closed) {
           setError(message(err));
-          setTurn((previous) => (previous?.state === "active" ? previous : null));
+          setTurn((previous) =>
+            previous?.state === "active" ? previous : null,
+          );
         }
       } finally {
         pending = false;
@@ -52,13 +54,18 @@ export function DemoGate({ children }: { children: ReactNode }) {
   const seconds =
     turn?.expiresAt === null || !turn?.expiresAt
       ? 0
-      : Math.max(0, Math.ceil((new Date(turn.expiresAt).getTime() - now) / 1000));
+      : Math.max(
+          0,
+          Math.ceil((new Date(turn.expiresAt).getTime() - now) / 1000),
+        );
 
   if (turn?.state === "active" && (!turn.expiresAt || seconds > 0)) {
     return (
       <>
         <div className="border-b border-line bg-accent/10 px-4 py-2 text-center text-xs font-semibold text-ink">
-          {turn.expiresAt ? `Free demo slot: ${seconds}s remaining · 20 MiB/video · 200 MiB global reserved · 1 active user` : "StreamForge development mode"}
+          {turn.expiresAt
+            ? `Free demo slot: ${seconds}s remaining · 20 MiB/video · 200 MiB global reserved · 1 active user`
+            : "StreamForge development mode"}
         </div>
         {children}
       </>
@@ -66,11 +73,16 @@ export function DemoGate({ children }: { children: ReactNode }) {
   }
 
   return (
-    <main id="main-content" className="mx-auto grid min-h-dvh max-w-xl content-center gap-6 p-6">
+    <main
+      id="main-content"
+      className="mx-auto grid min-h-dvh max-w-xl content-center gap-6 p-6"
+    >
       <Brand />
       <section className="grid gap-4 rounded-2xl border border-line bg-surface p-7">
         <h1 className="text-2xl font-bold">
-          {turn?.state === "queued" ? "You’re in the demo queue" : "Joining free demo…"}
+          {turn?.state === "queued"
+            ? "You’re in the demo queue"
+            : "Joining free demo…"}
         </h1>
         <p className="text-muted">
           StreamForge allows one active user for two minutes. All other users
@@ -81,10 +93,14 @@ export function DemoGate({ children }: { children: ReactNode }) {
         ) : (
           <LoadingState label="Checking next available slot…" />
         )}
-        {error && <p role="alert" className="text-sm text-danger">{error}</p>}
+        {error && (
+          <p role="alert" className="text-sm text-danger">
+            {error}
+          </p>
+        )}
         <p className="text-xs text-muted">
-          Hard demo limits: 20 MiB/file; 200 MiB global storage reservation;
-          5 uploads/day; 50/month; at most 5 waiting users. No paid upgrade.
+          Hard demo limits: 20 MiB/file; 200 MiB global storage reservation; 5
+          uploads/day; 50/month; at most 5 waiting users. No paid upgrade.
         </p>
       </section>
     </main>
