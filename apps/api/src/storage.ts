@@ -73,6 +73,10 @@ export class Storage implements OnApplicationShutdown {
 
   async ready() {
     const abortSignal = AbortSignal.timeout(4000);
+    if (process.env.DEMO_FREE_MODE === "1") {
+      await this.s3.send(new HeadBucketCommand({ Bucket: this.bucket }), { abortSignal });
+      return;
+    }
     await Promise.all([
       this.s3.send(new HeadBucketCommand({ Bucket: this.bucket }), {
         abortSignal,
@@ -251,6 +255,8 @@ export class Storage implements OnApplicationShutdown {
   }
 
   async enqueue(jobId: string, videoId: string) {
+    // ProcessingJob is already committed transactionally; local worker polls it.
+    if (process.env.DEMO_FREE_MODE === "1") return;
     await this.sqs.send(
       new SendMessageCommand({
         QueueUrl: this.config.SQS_QUEUE_URL,
