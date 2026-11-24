@@ -173,3 +173,24 @@ model ShareToken {
 
   @@index([videoId, revokedAt])
 }
+
+model DemoTurn {
+  userId   String   @id
+  joinedAt DateTime @default(now())
+  expiresAt DateTime?
+  mediaReads Int @default(0)
+  downloads Int @default(0)
+
+  @@index([joinedAt])
+  @@index([expiresAt])
+}
+
+model DemoUsage {
+  id           Int    @id
+  dayKey       String
+  dayUploads   Int    @default(0)
+  monthKey     String
+  monthUploads Int    @default(0)
+  dayTurns     Int    @default(0)
+  monthTurns   Int    @default(0)
+}

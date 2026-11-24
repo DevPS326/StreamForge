@@ -8,6 +8,7 @@ import {
   ExecutionContext,
   Get,
   HttpCode,
+  HttpException,
   Inject,
   Injectable,
   Patch,
@@ -141,6 +142,19 @@ export class SessionGuard implements CanActivate {
     if (!session || session.expiresAt <= new Date())
       throw new UnauthorizedException("Your session has expired");
     request.auth = { sessionId: session.id, user: session.user };
+    if (
+      process.env.DEMO_FREE_MODE === "1" &&
+      /^\/api\/v1\/(uploads|videos)(?:\/|$)/.test(request.path)
+    ) {
+      const turn = await this.db.demoTurn.findUnique({
+        where: { userId: session.user.id },
+      });
+      if (!turn?.expiresAt || turn.expiresAt <= new Date())
+        throw new HttpException(
+          "Your free demo slot has expired. Join the waiting queue.",
+          429,
+        );
+    }
     return true;
   }
 }

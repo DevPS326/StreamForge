@@ -73,6 +73,12 @@ export class Storage implements OnApplicationShutdown {
 
   async ready() {
     const abortSignal = AbortSignal.timeout(4000);
+    if (process.env.DEMO_FREE_MODE === "1") {
+      await this.s3.send(new HeadBucketCommand({ Bucket: this.bucket }), {
+        abortSignal,
+      });
+      return;
+    }
     await Promise.all([
       this.s3.send(new HeadBucketCommand({ Bucket: this.bucket }), {
         abortSignal,
@@ -101,7 +107,13 @@ export class Storage implements OnApplicationShutdown {
     return result.UploadId;
   }
 
-  signPart(key: string, uploadId: string, partNumber: number, size: number) {
+  signPart(
+    key: string,
+    uploadId: string,
+    partNumber: number,
+    size: number,
+    ttlSeconds = 900,
+  ) {
     return getSignedUrl(
       this.presigner,
       new UploadPartCommand({
@@ -111,7 +123,21 @@ export class Storage implements OnApplicationShutdown {
         PartNumber: partNumber,
         ContentLength: size,
       }),
-      { expiresIn: 15 * 60, signableHeaders: new Set(["content-length"]) },
+      { expiresIn: ttlSeconds, signableHeaders: new Set(["content-length"]) },
+    );
+  }
+
+  signDownload(key: string, filename: string, ttlSeconds: number) {
+    const safe =
+      filename.replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 100) || "video.mp4";
+    return getSignedUrl(
+      this.presigner,
+      new GetObjectCommand({
+        Bucket: this.bucket,
+        Key: key,
+        ResponseContentDisposition: `attachment; filename="${safe}"`,
+      }),
+      { expiresIn: ttlSeconds },
     );
   }
 
@@ -251,6 +277,8 @@ export class Storage implements OnApplicationShutdown {
   }
 
   async enqueue(jobId: string, videoId: string) {
+    // ProcessingJob is already committed transactionally; local worker polls it.
+    if (process.env.DEMO_FREE_MODE === "1") return;
     await this.sqs.send(
       new SendMessageCommand({
         QueueUrl: this.config.SQS_QUEUE_URL,

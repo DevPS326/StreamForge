@@ -4,11 +4,11 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   Clipboard,
+  Download,
   Clock3,
   CloudUpload,
   Film,
   Folder,
-  Link2,
   LockKeyhole,
   Pencil,
   Share2,
@@ -155,6 +155,27 @@ export function VideoDetail({
     void manage("PATCH", "", { title });
   }
 
+  async function downloadVideo() {
+    if (busy || !video || share || video.status !== "READY") return;
+    setBusy(true);
+    try {
+      const result = await api<{ url: string }>(
+        "/videos/" + video.id + "/download",
+      );
+      const link = document.createElement("a");
+      link.href = result.url;
+      link.rel = "noopener noreferrer";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      toast("Private download link valid for up to two minutes.");
+    } catch (error) {
+      toast(message(error), "error");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function copyLink() {
     if (!link) return;
     try {
@@ -243,11 +264,11 @@ export function VideoDetail({
               <Button
                 type="button"
                 size="small"
-                onClick={() => show("share")}
-                aria-label="Share video"
+                onClick={() => void downloadVideo()}
+                aria-label="Download video (two-minute private link)"
               >
-                <Link2 />
-                Share
+                <Download />
+                Download · 2 min
               </Button>
             )}
             <Button

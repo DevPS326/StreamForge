@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import { parseConfig } from "../src/config";
 import type { Database } from "../src/database";
+import { DemoGate } from "../src/demo";
 import { dispatchDelay } from "../src/outbox";
 import type { Storage } from "../src/storage";
 import {
@@ -113,6 +114,7 @@ function fixture() {
     },
     uploads: new Uploads(
       db as unknown as Database,
+      new DemoGate(db as unknown as Database),
       storage as unknown as Storage,
       config,
     ),
@@ -185,6 +187,7 @@ describe("upload state transitions", () => {
       upload.storageUploadId,
       1,
       3,
+      900,
     );
   });
 

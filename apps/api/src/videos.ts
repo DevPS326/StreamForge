@@ -13,6 +13,7 @@ import {
   Post,
   Query,
   Req,
+  Res,
   UseGuards,
 } from "@nestjs/common";
 import {
@@ -24,6 +25,9 @@ import {
 } from "@nestjs/swagger";
 import type { Prisma, Video } from "@streamforge/db";
 import { z } from "zod";
+import type { Response } from "express";
+import { Readable } from "node:stream";
+import { pipeline } from "node:stream/promises";
 import {
   SessionGuard,
   digest,
@@ -32,6 +36,8 @@ import {
 } from "./auth";
 import { Database } from "./database";
 import { VideoPresenter } from "./media";
+import { DemoGate, DEMO_MODE } from "./demo";
+import { Storage } from "./storage";
 import { Uploads } from "./uploads";
 import {
   documentedBody,
@@ -139,6 +145,8 @@ export function afterCursor(
 export class VideoController {
   constructor(
     @Inject(Database) private readonly db: Database,
+    @Inject(DemoGate) private readonly gate: DemoGate,
+    @Inject(Storage) private readonly storage: Storage,
     @Inject(VideoPresenter) private readonly presenter: VideoPresenter,
     @Inject(Uploads) private readonly uploads: Uploads,
   ) {}
@@ -199,6 +207,72 @@ export class VideoController {
     });
     if (!video) throw new NotFoundException("Video not found");
     return this.presenter.video(video, null, video.shares.length > 0);
+  }
+
+  @Get(":id/download")
+  @ApiParam({ name: "id", format: "uuid" })
+  @ApiOperation({
+    summary: "Issue private download access bounded by the active demo slot",
+  })
+  async download(
+    @Req() request: AuthenticatedRequest,
+    @Param("id") idParam: string,
+  ) {
+    const id = validate(uuid, idParam);
+    const video = await this.db.video.findFirst({
+      where: { id, userId: request.auth.user.id, status: "READY" },
+      select: { id: true },
+    });
+    if (!video) throw new NotFoundException("Processed video is not ready");
+    const ends = await this.gate.assertActive(request.auth.user.id);
+    const seconds = ends ? Math.floor((+ends - Date.now()) / 1000) : 120;
+    if (seconds < 1) throw new ConflictException("Your download slot expired");
+    return {
+      url: `/api/v1/videos/${id}/download-file`,
+      expiresInSeconds: Math.min(120, seconds),
+    };
+  }
+
+  @Get(":id/download-file")
+  @ApiParam({ name: "id", format: "uuid" })
+  @ApiOperation({
+    summary: "Metered private download, limited to one request per demo slot",
+  })
+  async downloadFile(
+    @Req() request: AuthenticatedRequest,
+    @Res() response: Response,
+    @Param("id") idParam: string,
+  ) {
+    const id = validate(uuid, idParam);
+    const video = await this.db.video.findFirst({
+      where: { id, userId: request.auth.user.id, status: "READY" },
+      select: {
+        originalKey: true,
+        title: true,
+        mimeType: true,
+        sizeBytes: true,
+      },
+    });
+    if (!video) throw new NotFoundException("Processed video is not ready");
+    await this.gate.assertActive(request.auth.user.id);
+    await this.gate.reserveDownload(request.auth.user.id);
+    const object = await this.storage.get(video.originalKey);
+    if (!(object.Body instanceof Readable))
+      throw new ConflictException("Video download is not available");
+    const filename =
+      video.title.replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 100) || "video";
+    response.setHeader("Content-Type", video.mimeType);
+    response.setHeader(
+      "Content-Disposition",
+      `attachment; filename="${filename}"`,
+    );
+    response.setHeader("Cache-Control", "private, no-store");
+    response.setHeader("Content-Length", video.sizeBytes.toString());
+    try {
+      await pipeline(object.Body, response);
+    } finally {
+      object.Body.destroy();
+    }
   }
 
   @Patch(":id")
@@ -295,6 +369,10 @@ export class VideoController {
   ) {
     const id = validate(uuid, idParam);
     const userId = request.auth.user.id;
+    if (DEMO_MODE)
+      throw new ConflictException(
+        "Public sharing is disabled in free demo mode",
+      );
     const token = newSecret();
     await this.db.$transaction(async (tx) => {
       await tx.$queryRaw`SELECT id FROM "Video" WHERE id = ${id} AND "userId" = ${userId} FOR UPDATE`;
