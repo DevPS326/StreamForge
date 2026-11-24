@@ -23,6 +23,7 @@ import type { Request, Response } from "express";
 import { z } from "zod";
 import { API_CONFIG, API_PREFIX, type ApiConfig } from "./config";
 import { Database } from "./database";
+import { DemoGate, DEMO_MODE } from "./demo";
 import { Storage, storageStatus } from "./storage";
 import { uuid, validate } from "./validation";
 
@@ -127,7 +128,7 @@ export class VideoPresenter {
           id: video.id,
           shareId,
           prefix: video.mediaPrefix,
-          expiresAt: Date.now() + this.config.MEDIA_TOKEN_TTL_SECONDS * 1000,
+          expiresAt: Date.now() + Math.min(120, this.config.MEDIA_TOKEN_TTL_SECONDS) * 1000,
         },
         this.config.MEDIA_TOKEN_SECRET,
       );
@@ -157,6 +158,7 @@ export class VideoPresenter {
 export class MediaController {
   constructor(
     @Inject(Database) private readonly db: Database,
+    @Inject(DemoGate) private readonly gate: DemoGate,
     @Inject(Storage) private readonly storage: Storage,
     @Inject(API_CONFIG) private readonly config: ApiConfig,
   ) {}
@@ -201,6 +203,8 @@ export class MediaController {
       typeof grantParam === "string"
         ? verifyGrant(grantParam, this.config.MEDIA_TOKEN_SECRET)
         : undefined;
+    if (DEMO_MODE && grant?.shareId)
+      throw new NotFoundException("Public sharing is disabled in free demo mode");
     if (!grant || grant.id !== id || !validAssetPath(path))
       throw new NotFoundException("Media is not available");
 
@@ -213,9 +217,10 @@ export class MediaController {
           ? { shares: { some: { id: grant.shareId, revokedAt: null } } }
           : {}),
       },
-      select: { id: true },
+      select: { id: true, userId: true },
     });
     if (!video) throw new NotFoundException("Media is not available");
+    if (DEMO_MODE) await this.gate.assertActive(video.userId);
 
     response.setHeader("Cache-Control", "private, no-store");
     const key = `${grant.prefix}/${path}`;
